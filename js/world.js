@@ -1,351 +1,401 @@
 'use strict';
-// Mundo: tiles isométricos, paredes, objetos (voxel), geração do mapa, colisão, visão e caminhos.
+// Mundo: pisos, paredes voxel, geração da cidade densa (ruas, calçadas, lotes, casas com cômodos,
+// comércio, hospital, delegacia, galpões, laboratório, parque, área militar, periferia com mata),
+// colisão, linha de visão e caminhos (A* com heap).
 const WORLD = (() => {
-  const TW = 32, TH = 16, WALL_H = 46;
-  const N = 72;
-  const H = VX.hash;
+  const TW = 48, TH = 24, VPT = 24, WALL_H = 72, SC = Math.SQRT2;
+  const H = VX.hash, N3 = VX.vnoise, M = VX.M;
+  const MARGIN = 14, BLOCK = 40, COR = 14, NB = 4;
+  const N = 2 * MARGIN + NB * BLOCK + (NB + 1) * COR;
+  const CORS = []; for (let k = 0; k <= NB; k++) CORS.push(MARGIN + k * (BLOCK + COR));
 
   function iso(x, y) { return [(x - y) * (TW / 2), (x + y) * (TH / 2)]; }
   function unIso(sx, sy) { const a = sx / (TW / 2), b = sy / (TH / 2); return [(a + b) / 2, (b - a) / 2]; }
-
   function rng(seed) {
     let a = seed >>> 0;
     return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   }
 
-  // ---------- chão ----------
-  const F = { GRASS: 0, DIRT: 1, ASPHALT: 2, ROAD_X: 3, ROAD_Y: 4, SIDEWALK: 5, WOOD: 6, TILE: 7, LAB: 8, CONCRETE: 9, MIL: 10, CARPET: 11 };
-  const pack = (c) => (255 << 24) | ((c[2] | 0) << 16) | ((c[1] | 0) << 8) | (c[0] | 0);
-  function floorColor(type, u, v, ti, tj, vr, px, py) {
-    const n = H(px + vr * 40, py, ti * 3 + tj);
-    const hx = VX.hex;
-    switch (type) {
-      case F.GRASS: {
-        const base = [hx('#4f6b34'), hx('#58763a'), hx('#4a6331'), hx('#5c7a3c')][vr % 4];
-        if (n > 0.93) return hx('#7c9a4c');
-        if (n < 0.07) return hx('#3c5228');
-        if (vr === 3 && n > 0.86) return hx('#c9b04a');
-        return base;
+  // ---------- pisos ----------
+  const F = {};
+  ['GRAMA', 'GRAMA_ALTA', 'TERRA', 'CASCALHO', 'ASFALTO', 'LINHA_X', 'LINHA_Y', 'BORDA_X', 'BORDA_Y', 'ZEBRA_X', 'ZEBRA_Y', 'CALCADA', 'MADEIRA', 'MADEIRA_ESC', 'COZINHA', 'AZULEJO', 'CARPETE', 'CARPETE_AZ', 'CARPETE_VI', 'LAB', 'CONCRETO', 'HOSPITAL', 'VAGA', 'MICELIO', 'CRATERA', 'LOJA', 'PARQUE', 'MILITAR'].forEach((k, i) => (F[k] = i));
+  const hx = VX.hex;
+  function floorColor(t, u, v, vr, px, py) {
+    const n = H(px + vr * 53, py, t * 7 + vr), sn = N3(px * 0.18 + vr * 9, py * 0.36, vr);
+    const sh = (c, k) => VX.shade(c, k);
+    switch (t) {
+      case F.GRAMA: case F.PARQUE: case F.GRAMA_ALTA: {
+        const base = t === F.GRAMA_ALTA ? '#3e5a2a' : t === F.PARQUE ? (Math.floor((u + v) * 3) % 2 ? '#5e8a3e' : '#56803a') : ['#4f6e34', '#56763a', '#4a6631', '#5a7a3c'][vr % 4];
+        let c = sh(base, 0.88 + sn * 0.24);
+        if (n > 0.95) c = hx('#86a854'); else if (n < 0.05) c = hx('#34481f');
+        if (vr === 3 && n > 0.985) c = hx(['#e8d84a', '#e8e8f0', '#d86a8a'][Math.floor(n * 1000) % 3]);
+        return c;
       }
-      case F.DIRT: return n > 0.85 ? hx('#8a6e4a') : n < 0.15 ? hx('#5e4a32') : hx('#75603f');
-      case F.ASPHALT: case F.ROAD_X: case F.ROAD_Y: {
-        if (type === F.ROAD_X && Math.abs(v - 0.5) < 0.05 && u > 0.15 && u < 0.6) return hx('#c9a63a');
-        if (type === F.ROAD_Y && Math.abs(u - 0.5) < 0.05 && v > 0.15 && v < 0.6) return hx('#c9a63a');
-        if (n > 0.9) return hx('#4c4c52');
-        if (n < 0.05) return hx('#2a2a2e');
-        return hx('#3a3a40');
+      case F.TERRA: return sh(n > 0.9 ? '#8a6e4a' : '#75603f', 0.88 + sn * 0.24);
+      case F.CASCALHO: return sh(n > 0.7 ? '#9a968c' : n < 0.3 ? '#6a665e' : '#827e74', 0.92 + sn * 0.14);
+      case F.ASFALTO: case F.LINHA_X: case F.LINHA_Y: case F.BORDA_X: case F.BORDA_Y: case F.ZEBRA_X: case F.ZEBRA_Y: case F.VAGA: {
+        if (t === F.LINHA_X && v < 0.07 && u > 0.1 && u < 0.62) return hx('#d8b43a');
+        if (t === F.LINHA_Y && u < 0.07 && v > 0.1 && v < 0.62) return hx('#d8b43a');
+        if (t === F.BORDA_X && v > 0.88 && v < 0.95) return hx('#d8d8d0');
+        if (t === F.BORDA_Y && u > 0.88 && u < 0.95) return hx('#d8d8d0');
+        if (t === F.ZEBRA_X && Math.floor(u * 4) % 2 === 0 && v > 0.08 && v < 0.92) return sh('#e2e2da', 0.92 + sn * 0.1);
+        if (t === F.ZEBRA_Y && Math.floor(v * 4) % 2 === 0 && u > 0.08 && u < 0.92) return sh('#e2e2da', 0.92 + sn * 0.1);
+        if (t === F.VAGA && u < 0.05) return hx('#d8d8d0');
+        const crack = Math.abs(N3(px * 0.12 + vr * 3, py * 0.24, 2) - 0.5) < 0.012;
+        if (crack) return hx('#1e1e22');
+        return sh(n > 0.92 ? '#4a4a52' : n < 0.06 ? '#2a2a2e' : '#38383e', 0.9 + sn * 0.16);
       }
-      case F.SIDEWALK: {
-        if (u < 0.06 || v < 0.06) return hx('#7c7a76');
-        return n > 0.9 ? hx('#a4a29c') : hx('#96948e');
+      case F.CALCADA: {
+        if (u < 0.04 || v < 0.04 || Math.abs(u - 0.5) < 0.02 || Math.abs(v - 0.5) < 0.02) return hx('#76746e');
+        return sh(n > 0.93 ? '#aaa8a0' : '#98968e', 0.94 + sn * 0.1);
       }
-      case F.WOOD: {
+      case F.MADEIRA: case F.MADEIRA_ESC: {
+        const base = t === F.MADEIRA ? ['#9a6a3e', '#8f6038', '#a07040', '#946640'] : ['#5e3a22', '#563420', '#664028', '#5a3822'];
         const plank = Math.floor(u * 4);
-        if ((u * 4) % 1 < 0.12) return hx('#5a3a22');
-        const c = [hx('#8a5c36'), hx('#93633a'), hx('#7f5532'), hx('#8f6038')][(plank + vr) % 4];
-        return n > 0.92 ? VX.shade(c, 0.85) : c;
+        if ((u * 4) % 1 < 0.08) return hx(t === F.MADEIRA ? '#5a3a22' : '#2e1c10');
+        const off = (plank % 2) * 0.5;
+        if (Math.abs(((v + off) % 1) - 0.02) < 0.02) return hx(t === F.MADEIRA ? '#6a4628' : '#3a2414');
+        const grain = N3(u * 40 + plank * 7, v * 6, vr);
+        return sh(base[(plank + vr) % 4], 0.86 + grain * 0.24);
       }
-      case F.TILE: {
-        const ch = (Math.floor(u * 2) + Math.floor(v * 2)) % 2;
-        if ((u * 2) % 1 < 0.06 || (v * 2) % 1 < 0.06) return hx('#6d6a64');
-        return ch ? hx('#d8d2c4') : hx('#8c3a34');
+      case F.COZINHA: { if ((u * 3) % 1 < 0.05 || (v * 3) % 1 < 0.05) return hx('#6d6a64'); return (Math.floor(u * 3) + Math.floor(v * 3)) % 2 ? sh('#e2dccc', 0.96 + sn * 0.06) : sh('#3a3a40', 0.96 + sn * 0.08); }
+      case F.AZULEJO: { if ((u * 6) % 1 < 0.1 || (v * 6) % 1 < 0.1) return hx('#a8b4b8'); return sh('#e8eef0', 0.96 + sn * 0.06); }
+      case F.LOJA: { if ((u * 2) % 1 < 0.03 || (v * 2) % 1 < 0.03) return hx('#a89c84'); return sh('#d8ccb0', 0.95 + sn * 0.08); }
+      case F.CARPETE: case F.CARPETE_AZ: case F.CARPETE_VI: { const b = t === F.CARPETE ? '#7a6a5a' : t === F.CARPETE_AZ ? '#3e5270' : '#6a2e3e'; return sh(b, 0.9 + n * 0.12 + sn * 0.06); }
+      case F.LAB: { if ((u * 2) % 1 < 0.035 || (v * 2) % 1 < 0.035) return hx('#a8b4b8'); return sh('#dce4e6', 0.96 + sn * 0.06); }
+      case F.HOSPITAL: { if ((u * 2) % 1 < 0.03 || (v * 2) % 1 < 0.03) return hx('#88a49c'); return sh('#b8ccc4', 0.95 + sn * 0.08); }
+      case F.CONCRETO: case F.MILITAR: { const b = t === F.MILITAR ? '#6c6e5a' : '#7c7c76'; if (u < 0.025 || v < 0.025) return hx('#5a5a56'); const st = N3(px * 0.08 + vr * 5, py * 0.16, 7); return sh(b, 0.88 + sn * 0.12 - (st > 0.72 ? 0.12 : 0)); }
+      case F.MICELIO: {
+        const vein = Math.abs(N3(px * 0.15 + vr * 7, py * 0.3, 3) - 0.5);
+        if (vein < 0.018) return hx(n > 0.5 ? '#7ff7e5' : '#d06aff');
+        if (vein < 0.05) return hx('#6b3f8e');
+        return sh(sn > 0.6 ? '#3a2448' : '#2a1a36', 0.9 + n * 0.15);
       }
-      case F.LAB: {
-        if ((u * 2) % 1 < 0.06 || (v * 2) % 1 < 0.06) return hx('#a8b4b8');
-        return n > 0.9 ? hx('#e4ecee') : hx('#d4dde0');
-      }
-      case F.CONCRETE: return n > 0.88 ? hx('#8a8a84') : n < 0.08 ? hx('#62625e') : hx('#7a7a74');
-      case F.MIL: {
-        if (u < 0.05 || v < 0.05) return hx('#4a4c40');
-        return n > 0.88 ? hx('#7a7c66') : hx('#6c6e5a');
-      }
-      case F.CARPET: return n > 0.8 ? hx('#5a3a5a') : hx('#4c3050');
+      case F.CRATERA: { const c = N3(px * 0.1, py * 0.2, vr); return sh(c > 0.6 ? '#2a2420' : '#1a1614', 0.9 + n * 0.2); }
     }
     return [255, 0, 255];
   }
+  const pack = (c) => (255 << 24) | ((Math.max(0, Math.min(255, c[2])) | 0) << 16) | ((Math.max(0, Math.min(255, c[1])) | 0) << 8) | (Math.max(0, Math.min(255, c[0])) | 0);
   const floorSprites = {};
-  function floorSprite(type, vr) {
-    const key = type * 8 + vr;
+  function floorSprite(t, vr) {
+    const key = t * 8 + vr;
     if (floorSprites[key]) return floorSprites[key];
     const cv = document.createElement('canvas'); cv.width = TW; cv.height = TH;
     const ctx = cv.getContext('2d');
     const id = ctx.createImageData(TW, TH); const U = new Uint32Array(id.data.buffer);
     for (let py = 0; py < TH; py++) for (let px = 0; px < TW; px++) {
-      const rx = px + 0.5 - 16, ry = py + 0.5;
-      if (Math.abs(rx) / 16 + Math.abs(ry - 8) / 8 > 1.0001) continue;
-      const u = (rx / 16 + ry / 8) / 2, v = (ry / 8 - rx / 16) / 2;
-      U[py * TW + px] = pack(floorColor(type, Math.min(0.999, Math.max(0, u)), Math.min(0.999, Math.max(0, v)), 0, 0, vr, px, py));
+      const rx = px + 0.5 - TW / 2, ry = py + 0.5;
+      if (Math.abs(rx) / (TW / 2) + Math.abs(ry - TH / 2) / (TH / 2) > 1.0001) continue;
+      const u = (rx / (TW / 2) + ry / (TH / 2)) / 2, v = (ry / (TH / 2) - rx / (TW / 2)) / 2;
+      U[py * TW + px] = pack(floorColor(t, Math.min(0.999, Math.max(0, u)), Math.min(0.999, Math.max(0, v)), vr, px, py));
     }
     ctx.putImageData(id, 0, 0);
     return (floorSprites[key] = cv);
   }
 
-  // ---------- paredes ----------
+  // ---------- estilos de parede ----------
+  const W = { NONE: 0, WALL: 1, WINDOW: 2, DOOR: 3, DOORWAY: 4, STORE: 5, GARAGE: 6 };
+  const brick = (base, mortar) => (u, y) => { const row = Math.floor(y / 3.2); const off = (row % 2) * 4; return (y % 3.2) < 0.7 || ((u + off) % 8) < 0.7 ? mortar : VX.shade(base, 0.9 + H(Math.floor((u + off) / 8), row, 3) * 0.2); };
+  const siding = (base) => (u, y) => ((y % 4.8) < 0.8 ? VX.shade(base, 0.78) : VX.shade(base, 0.96 + N3(u * 0.3, y * 0.2, 1) * 0.08));
+  const plaster = (base, base2) => (u, y) => (y < 4 ? VX.shade(base2 || '#e8e4dc', 0.85) : Math.abs(y - 30) < 0.8 ? VX.shade(base, 0.85) : VX.shade(base, 0.95 + N3(u * 0.2, y * 0.2, 2) * 0.08));
+  const tiles = (base, line, sz) => (u, y) => ((u % sz) < 0.6 || (y % sz) < 0.6 ? line : VX.shade(base, 0.97 + H(Math.floor(u / sz), Math.floor(y / sz), 5) * 0.06));
+  const panel = (base) => (u, y) => ((u % 12) < 0.7 || (y % 24) < 0.7 ? VX.shade(base, 0.75) : VX.shade(base, 0.95 + N3(u * 0.1, y * 0.1, 3) * 0.1));
+  const corr = (base) => (u, y) => { const n = VX.fbm(u * 0.08, y * 0.06, 4); const r = n > 0.64; return r ? VX.mix('#7a3e1e', '#a0582a', H(u, y, 1)) : VX.shade(base, (u % 3) < 1.5 ? 0.82 : 1.02); };
+  const planks = (base) => (u, y) => ((u % 6) < 0.8 ? VX.shade(base, 0.55) : VX.shade(base, 0.85 + N3(u * 0.4, y * 0.05, 6) * 0.3));
   const STYLES = [
-    { name: 'casa', base: '#c9b28a', pat: 'siding' },
-    { name: 'tijolo', base: '#9a5a44', pat: 'brick' },
-    { name: 'mercado', base: '#8fa3ad', pat: 'panel', stripe: '#c0392b' },
-    { name: 'farmacia', base: '#e2e4dc', pat: 'panel', stripe: '#2f9e5a' },
-    { name: 'delegacia', base: '#6f8aa8', pat: 'brick', stripe: '#24344a' },
-    { name: 'lab', base: '#dfe6ea', pat: 'panel', stripe: '#2a9d9a' },
-    { name: 'armazem', base: '#7f8580', pat: 'corr' },
-    { name: 'militar', base: '#6b7050', pat: 'block' },
+    { id: 'tijolo', face: brick('#9a4a36', '#c8b8a0') },
+    { id: 'tijolo_cinza', face: brick('#8a8480', '#bab4ac') },
+    { id: 'siding_azul', face: siding('#7a98b0') },
+    { id: 'siding_creme', face: siding('#d8ccaa') },
+    { id: 'siding_verde', face: siding('#8aa088') },
+    { id: 'siding_amarelo', face: siding('#d8b868') },
+    { id: 'reboco_rosa', face: plaster('#d8a8a0', '#b88880') },
+    { id: 'concreto', face: panel('#9a9890') },
+    { id: 'metal', face: corr('#8a9298') },
+    { id: 'metal_azul', face: corr('#4a6a8a') },
+    { id: 'azulejo_ext', face: tiles('#e4e8ea', '#b8c0c4', 6) },
+    { id: 'madeira_ext', face: planks('#7a5232') },
+    // interiores (índice 12+)
+    { id: 'int_creme', face: plaster('#e8dcc0') },
+    { id: 'int_verde', face: plaster('#a8c0a0') },
+    { id: 'int_azul', face: plaster('#a8bcd0') },
+    { id: 'int_rosa', face: plaster('#e0b8b0') },
+    { id: 'int_branco', face: plaster('#eceae4', '#c8c4bc') },
+    { id: 'int_azulejo', face: tiles('#f0f2f2', '#b8c4c8', 4) },
+    { id: 'int_cozinha', face: (u, y) => (y < 36 && y > 24 ? tiles('#e8e0c8', '#a89c84', 4)(u, y) : plaster('#f0e8d0')(u, y)) },
+    { id: 'int_madeira', face: (u, y) => (y < 28 ? planks('#7a5232')(u, y) : plaster('#e8dcc0')(u, y)) },
+    { id: 'int_papel', face: (u, y) => (y < 4 ? '#6a4a30' : (Math.floor(u / 3) % 3 === 0 ? '#8a6a8a' : '#c8b0c0')) },
+    { id: 'int_lab', face: (u, y) => (Math.abs(y - 26) < 1.2 ? '#2a9d9a' : panel('#e4ecee')(u, y)) },
+    { id: 'int_hospital', face: (u, y) => (y < 30 ? VX.shade('#9ac0b4', 0.96 + N3(u * 0.2, y * 0.2, 1) * 0.06) : plaster('#eef2f0')(u, y)) },
+    { id: 'int_concreto', face: panel('#a8a6a0') },
+    // cercas (índice 24+)
+    { id: 'cerca_arame', fence: 1, see: 1, h: 44 },
+    { id: 'cerca_madeira', fence: 1, h: 40 },
+    { id: 'muro', fence: 1, see: 1, h: 30, face: panel('#a8a49c') },
   ];
-  const W_NONE = 0, W_WALL = 1, W_WIN = 2, W_DOOR = 3;
-  const wallSprites = {};
-  // kind: 1 parede, 2 janela, 3 porta fechada, 4 porta aberta, 5 porta quebrada
-  function wallSprite(style, side, kind) {
-    const key = style + ':' + side + ':' + kind;
-    if (wallSprites[key]) return wallSprites[key];
-    const S = STYLES[style];
-    const Wd = 17, Hd = WALL_H + 12;
-    const cv = document.createElement('canvas'); cv.width = Wd; cv.height = Hd;
-    const ctx = cv.getContext('2d');
-    const id = ctx.createImageData(Wd, Hd); const U = new Uint32Array(id.data.buffer);
-    const light = side === 'N' ? 0.95 : 0.76;
-    const base = VX.hex(S.base);
-    const set = (x, y, c) => { if (x >= 0 && x < Wd && y >= 0 && y < Hd) U[y * Wd + x] = pack(c); };
-    for (let k = 0; k <= 16; k++) {
-      const x = side === 'N' ? k : 16 - k;
-      const by = WALL_H + 2 + Math.floor(k / 2);
-      const u = k / 16;
-      for (let h = 0; h < WALL_H; h++) {
-        const y = by - h;
-        let c = base;
-        const n = H(k, h, style);
-        if (S.pat === 'siding') { if (h % 4 === 0) c = VX.shade(base, 0.82); }
-        else if (S.pat === 'brick') { const row = Math.floor(h / 3); if (h % 3 === 0 || (k + (row % 2) * 2) % 5 === 0) c = VX.shade(base, 0.75); }
-        else if (S.pat === 'panel') { if (k % 8 === 0) c = VX.shade(base, 0.85); }
-        else if (S.pat === 'corr') { if (k % 2 === 0) c = VX.shade(base, 0.86); }
-        else if (S.pat === 'block') { if (h % 6 === 0 || (k + Math.floor(h / 6) * 4) % 8 === 0) c = VX.shade(base, 0.8); }
-        if (S.stripe && h >= 30 && h < 33) c = VX.hex(S.stripe);
-        if (h < 3) c = VX.shade(base, 0.6);
-        if (n > 0.95) c = VX.shade(c, 0.9);
-        let edge = k === 0 || k === 16;
-        // aberturas
-        if (kind === 2 && u > 0.22 && u < 0.82 && h >= 16 && h < 36) {
-          const fr = u < 0.28 || u > 0.76 || h < 18 || h >= 34 || Math.abs(u - 0.52) < 0.04;
-          c = fr ? VX.hex('#e8e4da') : (h > 26 && u < 0.5 ? VX.hex('#a8d0e0') : VX.hex('#5f8aa0'));
-          if (!fr && H(k, h, 7) > 0.97) c = VX.hex('#d8f0ff');
+  const S = {}; STYLES.forEach((s, i) => (S[s.id] = i));
+  const DOORS = [
+    { c: '#7a4a28', panel: 1 }, { c: '#e8e6e0', panel: 1 }, { c: '#8a5a34', glass: 1 }, { c: '#7a8088', metal: 1 }, { c: '#b83a2a', panel: 1 }, { c: '#4a7a4a', panel: 1 },
+  ];
+
+  // modelo voxel de um segmento de parede (lado N; o lado W é o mesmo modelo girado)
+  function buildWall(m, styleIdx, kind, state, dstyle, interior, cut) {
+    const st = STYLES[styleIdx];
+    const Hh = cut ? 12 : (st.h || WALL_H);
+    const face = st.face || ((u, y) => '#8a8a8a');
+    const R = 'r';
+    const capC = '#38363a';
+    if (st.fence) {
+      if (st.id === 'cerca_arame') {
+        for (const x of [0.5]) m.sdf(R, [-1.5, 0, -1.5, 2.5, Hh + 1, 1.5], VX.SD.cylY(x, 0, 0.9, 0, Hh), { c: '#8a9096', m: M.METAL });
+        m.sdf(R, [0, Hh - 2, -1, 24, Hh + 1, 1], VX.SD.cap([0, Hh - 0.5, 0], [24, Hh - 0.5, 0], 0.6, 0.6), { c: '#8a9096', m: M.METAL });
+        if (kind === W.DOOR && state === 1) return;
+        for (let u = 0; u < 24; u++) for (let y = 0; y < Hh - 1; y++) {
+          const a = ((u + y) % 6 + 6) % 6, b = ((u - y) % 6 + 6) % 6;
+          if (a < 1 || b < 1) m.add(R, u + 0.5, y + 0.5, 0, H(u, y, 1) > 0.97 ? '#7a5a3a' : '#b8bdc2', [0, 0, 1], M.METAL);
         }
-        if (kind >= 3 && u > 0.18 && u < 0.86 && h < 34) {
-          const fr = u < 0.24 || u > 0.8 || h >= 32;
-          if (fr) c = VX.hex('#5a3a22');
-          else if (kind === 3) {
-            c = (k % 4 === 0) ? VX.hex('#6e4426') : VX.hex('#83542e');
-            if (Math.abs(u - 0.7) < 0.04 && h > 14 && h < 17) c = VX.hex('#e0c060');
-          } else if (kind === 5) {
-            if (h < 6 && H(k, h, 3) > 0.5) c = VX.hex('#83542e'); else continue;
-          } else continue;
-        }
-        set(x, y, VX.shade(c, light * (edge ? 0.85 : 1)));
+        return;
       }
-      // tampo
-      set(x, by - WALL_H, VX.shade(base, 1.15));
-      set(x, by - WALL_H - 1, VX.shade(base, 1.05));
+      if (st.id === 'cerca_madeira') {
+        if (kind === W.DOOR && state === 1) { m.box(R, 0, 0, -1, 2, Hh, 2, '#6a4424'); return; }
+        for (let u = 0; u < 24; u += 4) m.box(R, u + 0.4, 0, -0.8, 3.2, Hh - (u % 8 ? 0 : 2), 1.6, (i) => VX.shade('#8a6a44', 0.85 + N3(i.x * 0.4, i.y * 0.1, 2) * 0.3));
+        m.box(R, 0, Hh * 0.3, -1.6, 24, 2, 0.8, '#6a4a2c'); m.box(R, 0, Hh * 0.75, -1.6, 24, 2, 0.8, '#6a4a2c');
+        return;
+      }
     }
-    ctx.putImageData(id, 0, 0);
-    return (wallSprites[key] = cv);
-  }
-
-  // ---------- objetos (voxel) ----------
-  const wood = (i) => (H(i.x, i.y, i.z) > 0.8 ? '#a06c3a' : H(i.x, i.y, i.z) < 0.15 ? '#7a4e28' : '#8f5f32');
-  const PROPS = {
-    caixa: { name: 'Caixa de madeira', loot: 'caixa', solid: 1, build(m) { m.box('r', -6, 0, -6, 12, 11, 12, (i) => (i.iy % 4 === 0 || i.ix === 0 || i.ix === 11 || i.iz === 0 || i.iz === 11 ? '#6e4424' : wood(i))); } },
-    militar: { name: 'Caixa militar', loot: 'militar', solid: 1, build(m) { m.box('r', -7, 0, -5, 14, 8, 10, (i) => (i.top && Math.abs(i.x) < 2 && Math.abs(i.z) < 3 ? '#c9b04a' : i.iy === 7 ? '#3e4626' : (H(i.x, i.y, i.z) > 0.85 ? '#56603a' : '#4d5634'))); m.box('r', -7.5, 2, -5.5, 15, 1, 11, (i) => (i.left || i.right || i.front || i.back ? '#2e3220' : null)); } },
-    barril: { name: 'Barril', solid: 1, build(m, v) { const c = ['#a83232', '#2f5f9e', '#c9a12a', '#7a5a32', '#4a7a3a'][v % 5]; m.cyl('r', 'y', 0, 0, 5.5, 0, 14, (i) => (i.k === 3 || i.k === 10 ? VX.shade(c, 0.7) : i.cap1 ? VX.shade(c, 0.85) : H(i.x, i.y, i.z) > 0.9 ? '#7a4a2a' : c)); } },
-    lixeira: { name: 'Lixeira', loot: 'lixeira', solid: 1, build(m) { m.cyl('r', 'y', 0, 0, 4.5, 0, 11, (i) => (i.k % 3 === 0 ? '#5c6268' : '#737a80')); m.cyl('r', 'y', 0, 0, 5, 11, 1, '#4f555a'); m.box('r', -1, 12, -0.5, 2, 1, 1, '#2e3236'); } },
-    geladeira: { name: 'Geladeira', loot: 'geladeira', solid: 1, build(m) { m.box('r', -5, 0, -4, 10, 24, 8, (i) => (i.front && i.iy === 15 ? '#9aa0a4' : i.front && i.ix === 8 && (i.iy > 17 && i.iy < 22 || i.iy > 8 && i.iy < 13) ? '#5a6064' : tex('#e6e8e4', i))); } },
-    prateleira: { name: 'Prateleira', loot: 'prateleira', solid: 1, build(m, v) { shelf(m, ['#c0392b', '#e8b030', '#3a7ac0', '#5aa04a', '#e8e0d0']); } },
-    farmacia: { name: 'Estante de remédios', loot: 'farmacia', solid: 1, build(m) { shelf(m, ['#ffffff', '#e05050', '#4a9a6a', '#f0f0f0', '#e08a30'], '#e8ecee'); } },
-    armario: { name: 'Armário de cozinha', loot: 'armario', solid: 1, build(m) { m.box('r', -7, 0, -5, 14, 9, 10, (i) => (i.top ? '#d8d4cc' : i.front && (i.ix === 7) ? '#5a3a22' : i.front && i.iy === 5 && (i.ix === 4 || i.ix === 10) ? '#c0c0c0' : wood(i))); } },
-    mesa: { name: 'Escrivaninha', loot: 'mesa', solid: 1, build(m) { m.box('r', -7, 7, -5, 14, 2, 10, wood); for (const [x, z] of [[-7, -5], [6, -5], [-7, 4], [6, 4]]) m.box('r', x, 0, z, 1, 7, 1, '#5a3a22'); m.box('r', -3, 9, -3, 6, 5, 1, (i) => (i.front && i.ix > 0 && i.ix < 5 && i.iy > 0 ? '#3a6a8a' : '#2a2c30')); m.box('r', 1, 7, -4, 5, 4, 1, '#6a4a2a'); } },
-    lab: { name: 'Bancada de laboratório', loot: 'lab', solid: 1, build(m) { m.box('r', -7, 0, -5, 14, 9, 10, (i) => (i.top ? '#2a3034' : tex('#e8ecee', i))); const cols = ['#3fd08a', '#3ab0e0', '#e05a8a', '#e0c040']; for (let k = 0; k < 4; k++) m.cyl('r', 'y', -5 + k * 3.3, -1 + (k % 2) * 2, 1.1, 9, 3 + (k % 2), (i) => (i.k === 0 || i.cap1 ? '#d8eef4' : cols[k])); } },
-    policia: { name: 'Armário de armas', loot: 'policia', solid: 1, build(m) { m.box('r', -6, 0, -3, 12, 22, 6, (i) => (i.front && i.ix === 6 ? '#2a3440' : i.front && i.iy > 17 && i.iy < 20 && i.ix % 2 ? '#2a3440' : tex('#5a6f88', i))); } },
-    guardaroupa: { name: 'Guarda-roupa', loot: 'guardaroupa', solid: 1, build(m) { m.box('r', -7, 0, -3.5, 14, 22, 7, (i) => (i.front && i.ix === 7 ? '#4a2e18' : i.front && i.iy === 11 && (i.ix === 6 || i.ix === 8) ? '#d0b060' : wood(i))); } },
-    bancada: { name: 'Bancada de ferramentas', loot: 'bancada', solid: 1, build(m) { m.box('r', -7, 7, -5, 14, 2, 10, '#6e5030'); for (const [x, z] of [[-7, -5], [6, -5], [-7, 4], [6, 4]]) m.box('r', x, 0, z, 1, 7, 1, '#4a4a4a'); m.box('r', -6, 9, -4, 4, 2, 3, '#b83a2a'); m.box('r', 1, 9, -2, 5, 1, 1, '#9aa0a6'); m.box('r', -6, 0, -4, 12, 1, 8, '#3a3a3e'); } },
-    cama: { name: 'Cama', solid: 1, build(m, v) { const c = ['#3a5a8a', '#8a3a4a', '#4a7a5a'][v % 3]; m.box('r', -6, 0, -7, 12, 5, 14, (i) => (i.iz > 10 ? '#e8e4dc' : i.top || i.iy > 2 ? c : '#5a3a22')); m.box('r', -6, 0, -8, 12, 9, 1, '#5a3a22'); } },
-    sofa: { name: 'Sofá', solid: 1, build(m) { m.box('r', -7, 0, -4, 14, 5, 8, '#5a6a3a'); m.box('r', -7, 5, -4, 14, 5, 3, '#4e5c32'); m.box('r', -7, 5, -1, 2, 2, 5, '#4e5c32'); m.box('r', 5, 5, -1, 2, 2, 5, '#4e5c32'); } },
-    arvore: { name: 'Árvore', solid: 1, tall: 1, build(m, v) {
-      m.cyl('r', 'y', 0, 0, 1.8, 0, 14, (i) => (H(i.x, i.y, i.z) > 0.7 ? '#4a3220' : '#5e4028'));
-      if (v % 3 === 2) { for (let k = 0; k < 4; k++) m.ellipsoid('r', 0, 12 + k * 6, 0, 8 - k * 1.8, 4, 8 - k * 1.8, (i) => (H(i.x, i.y, i.z) > 0.75 ? '#2e5a34' : H(i.x, i.y, i.z) < 0.2 ? '#1e3e24' : '#264c2c')); }
-      else { const g = v % 3 ? ['#5a7a2e', '#4a6a26', '#6e8e36'] : ['#3e6a2e', '#335a26', '#4e7e36']; m.ellipsoid('r', 0, 20, 0, 9, 8, 9, (i) => { const r = H(i.x, i.y, i.z); return r > 0.75 ? g[2] : r < 0.25 ? g[1] : g[0]; }); m.ellipsoid('r', 3, 25, -2, 5, 4, 5, (i) => (H(i.x, i.y, i.z) > 0.5 ? (v % 3 ? '#6e8e36' : '#4e7e36') : null)); }
-    } },
-    arbusto: { name: 'Arbusto', solid: 0, build(m) { m.ellipsoid('r', 0, 3, 0, 6, 4, 6, (i) => (H(i.x, i.y, i.z) > 0.7 ? '#5f8a3a' : '#4a7030')); } },
-    sacos: { name: 'Sacos de areia', solid: 1, build(m) { for (let r = 0; r < 3; r++) for (let k = 0; k < 3; k++) m.ellipsoid('r', -5 + k * 5 + (r % 2) * 2.5 - 1.25, 1.5 + r * 3, 0, 3, 1.8, 4, (i) => (H(i.x, i.y, i.z) > 0.8 ? '#a8946a' : '#958258')); } },
-    poste: { name: 'Poste', solid: 1, light: 1, build(m) { m.cyl('r', 'y', 0, 0, 1, 0, 34, '#4a4e54'); m.box('r', -1, 33, 0, 2, 1, 7, '#4a4e54'); m.box('r', -2, 31, 5, 4, 2, 3, (i) => (i.bottom ? '#fff2b0' : '#3a3e44')); } },
-    barreira: { name: 'Barreira', solid: 1, build(m) { m.box('r', -7, 0, -3, 14, 3, 6, '#9a9890'); m.box('r', -7, 3, -2, 14, 5, 4, (i) => (i.iy === 3 && i.front ? '#c9a03a' : '#a8a69e')); } },
-    bolsa: { name: 'Itens no chão', solid: 0, build(m) { m.ellipsoid('r', 0, 2.5, 0, 3.5, 3, 3, '#6a5a3a'); m.box('r', -1, 5, -1, 2, 1, 2, '#4a3e28'); } },
-    barricada: { name: 'Barricada', solid: 1, hp: 120, build(m) {
-      for (let k = 0; k < 5; k++) m.box('r', -8, k * 3.2, -1, 16, 2, 2, (i) => (H(i.x, i.y, i.z) > 0.8 ? '#a06c3a' : '#8a5a30'));
-      m.box('r', -6, 0, 1, 2, 16, 1, '#6a4424'); m.box('r', 4, 0, 1, 2, 16, 1, '#6a4424');
-      m.box('r', -1, 0, -2, 2, 16, 1, '#6a4424');
-    } },
-    carro: { name: 'Carro abandonado', loot: 'carro', solid: 1, big: 1, build(m, v) {
-      const C = [['#8a2a2a', '#6a1e1e'], ['#d8d8d4', '#a8a8a4'], ['#2e3440', '#1e2228'], ['#e8e8ec', '#1e2a4a'], ['#c9a03a', '#8a6a20'], ['#3a5a3a', '#2a4028']][v % 6];
-      const police = v % 6 === 3;
-      m.box('r', -15, 3, -7, 30, 7, 14, (i) => { if (police && i.iy > 2 && (i.left || i.right || i.front || i.back) && Math.abs(i.x) < 6) return C[1]; if (i.iy === 3) return VX.shade(C[0], 0.75); if ((i.left) && i.iy > 2 && Math.abs(i.z) < 5) return '#e8e0b0'; if (i.right && i.iy > 3 && Math.abs(i.z) > 4) return '#c03030'; return H(i.x, i.y, i.z) > 0.93 ? '#6a4a30' : C[0]; });
-      m.box('r', -7, 10, -6, 15, 6, 12, (i) => (i.top ? (police ? (Math.abs(i.z) < 1.5 ? (i.x < 0.5 ? '#3050e0' : '#e03030') : C[0]) : C[0]) : (i.iy > 0 && i.iy < 5 && !(i.ix === 0 || i.ix === 14) ? '#2a3a4a' : C[1])));
-      for (const [x, z] of [[-9, -7.5], [9, -7.5], [-9, 6.5], [9, 6.5]]) m.cyl('r', 'z', x, 3, 3, z, 1, (i) => (Math.abs(i.u) < 1.2 && Math.abs(i.v) < 1.2 ? '#8a8a8a' : '#1a1a1c'));
-    } },
-  };
-  function tex(base, i) { const r = H(i.x, i.y, i.z); return r > 0.9 ? VX.shade(base, 1.06) : r < 0.1 ? VX.shade(base, 0.92) : base; }
-  function shelf(m, cols, frame) {
-    frame = frame || '#7a8088';
-    m.box('r', -7, 0, -3, 14, 18, 6, (i) => (i.front && !i.left && !i.right && i.iy % 6 !== 0 && !i.top ? null : tex(frame, i)));
-    m.box('r', -6, 1, -2, 12, 16, 1, VX.shade(frame, 0.7));
-    for (let s = 0; s < 3; s++) for (let k = 0; k < 5; k++) if (H(k, s, 1) > 0.2) {
-      const c = cols[(k + s * 2) % cols.length];
-      m.box('r', -6 + k * 2.4, 1 + s * 6, -1, 2, 3 + (k % 2), 3, c);
+    const t0 = st.fence ? -2 : -2.5, t1 = st.fence ? 2 : 2.5;
+    // aberturas
+    let hole = null;
+    if (kind === W.WINDOW) hole = [4, 20, 26, 56];
+    else if (kind === W.DOOR || kind === W.DOORWAY) hole = [3, 21, 0, 62];
+    else if (kind === W.STORE) hole = [1, 23, 6, 64];
+    else if (kind === W.GARAGE) hole = [1, 23, 0, 58];
+    const inHole = (u, y) => hole && u > hole[0] && u < hole[1] && y > hole[2] && y < hole[3];
+    for (let iu = 0; iu < 24; iu++) for (let iy = 0; iy < Hh; iy++) {
+      const u = iu + 0.5, y = iy + 0.5;
+      if (inHole(u, y)) {
+        // laterais da abertura (espessura)
+        continue;
+      }
+      const top = iy === Hh - 1;
+      const holeEdge = hole && ((Math.abs(u - hole[0]) < 1 || Math.abs(u - hole[1]) < 1) && y > hole[2] && y < hole[3] || (Math.abs(y - hole[3]) < 1 || (hole[2] > 0 && Math.abs(y - hole[2]) < 1)) && u > hole[0] && u < hole[1]);
+      for (let iz = 0; iz < t1 - t0; iz++) {
+        const z = t0 + iz + 0.5;
+        const front = iz === t1 - t0 - 1, back = iz === 0;
+        const endL = iu === 0, endR = iu === 23;
+        const nearHole = hole && ((u > hole[0] - 1 && u < hole[0] + 0.01 || u < hole[1] + 1 && u > hole[1] - 0.01) && y > hole[2] && y < hole[3] || (y > hole[3] - 0.01 && y < hole[3] + 1 || hole[2] > 0 && y < hole[2] + 0.01 && y > hole[2] - 1) && u > hole[0] && u < hole[1]);
+        if (!(front || back || top || endL || endR || nearHole)) continue;
+        let c, n;
+        if (top) { c = capC; n = [0, 1, 0]; }
+        else if (front) { c = face(u, y, interior); n = [0, 0, 1]; if (holeEdge) c = kind === W.STORE ? '#3a3e44' : '#ece8e0'; }
+        else if (back) { c = face(u, y, interior); n = [0, 0, -1]; }
+        else if (nearHole) { c = '#ece8e0'; n = [0, 0, 1]; }
+        else { c = VX.shade(face(u, y, interior), 0.85); n = [endL ? -1 : 1, 0, 0]; }
+        m.add(R, u, y, z, c, n, 0);
+      }
+    }
+    if (cut) return;
+    if (kind === W.WINDOW) {
+      const broken = state === 1;
+      for (let u = 4; u < 20; u++) for (let y = 26; y < 56; y++) {
+        const uu = u + 0.5, yy = y + 0.5;
+        const fr = Math.abs(uu - 12) < 0.6 || Math.abs(yy - 41) < 0.6;
+        if (fr) { m.add(R, uu, yy, 0, '#ece8e0', [0, 0, 1], 0); continue; }
+        if (broken && H(u, y, 9) > 0.25 && Math.abs(yy - 26) > 3) continue;
+        const refl = (uu + yy * 0.6) % 14 < 2.2;
+        m.add(R, uu, yy, 0, refl ? '#d8f0ff' : interior ? '#6a8aa0' : '#4a6a84', [0, 0, 1], M.GLASS);
+      }
+      m.box(R, 3, 24.5, 0, 18, 1.5, 4, '#e8e4dc');
+      if (interior) { for (const s of [0, 1]) m.box(R, s ? 16 : 4, 30, 2.6, 4, 27, 1.2, (i) => VX.shade(['#b04a4a', '#4a7ab0', '#c8a040', '#6a9a5a'][styleIdx % 4], 0.85 + ((i.x | 0) % 2) * 0.15)); }
+    }
+    if (kind === W.STORE) {
+      const broken = state === 1;
+      for (let u = 1; u < 23; u++) for (let y = 6; y < 64; y++) {
+        const uu = u + 0.5, yy = y + 0.5;
+        if (Math.abs(uu - 12) < 0.7) { m.add(R, uu, yy, 0, '#3a3e44', [0, 0, 1], M.METAL); continue; }
+        if (broken && H(u, y, 4) > 0.2 && yy > 9) continue;
+        m.add(R, uu, yy, 0, (uu + yy * 0.6) % 16 < 2.5 ? '#e0f4ff' : '#5a7a90', [0, 0, 1], M.GLASS);
+      }
+    }
+    if (kind === W.GARAGE && state === 0) m.box(R, 1, 0, -0.5, 22, 58, 1, (i) => ({ c: (i.y | 0) % 4 === 0 ? '#6a7076' : '#a0a6ac', m: M.METAL }));
+    if (kind === W.DOOR) {
+      const D = DOORS[dstyle % DOORS.length];
+      const leaf = (i) => {
+        if (D.glass && i.y > 20 && i.y < 56 && (Math.abs(i.x - 12) < 6 || Math.abs(i.z - 10) < 7)) return { c: '#6a8aa0', m: M.GLASS };
+        if (D.panel && (((i.y > 34 && i.y < 56) || (i.y > 8 && i.y < 30)) && ((i.x > 6 && i.x < 18) || (i.z > 4 && i.z < 16))) && H(i.x, i.y, 1) > 0.0) return VX.shade(D.c, 0.85);
+        return D.metal ? { c: D.c, m: M.METAL } : VX.shade(D.c, 0.92 + N3(i.x * 0.3, i.y * 0.08, i.z * 0.3) * 0.16);
+      };
+      if (state === 0) { m.box(R, 3, 0, -1, 18, 62, 2, leaf); m.sdf(R, [15, 28, 0, 19, 33, 4], VX.SD.sphere(17.5, 30.5, 1.8, 1), { c: '#d8b848', m: M.METAL }); }
+      else if (state === 1) m.box(R, 3, 0, 1, 2, 62, 18, (i) => leaf({ x: 12, y: i.y, z: i.z }));
+      else { m.box(R, 4, 0, 3, 14, 2, 10, leaf); m.box(R, 3, 0, -1, 2, 20, 2, leaf); }
     }
   }
-  const propSprites = {};
-  function propSprite(type, variant, rot) {
-    const key = type + ':' + (variant || 0) + ':' + (rot || 0);
-    if (propSprites[key]) return propSprites[key];
+  // tamanho fixo e origem para sprites de parede (garante emenda perfeita entre tiles)
+  const WF = { W: 104, H: 150, ox: 52, oy: 122 };
+  const wallSprites = new Map();
+  let wallBudget = 1e9;
+  function wallSprite(styleIdx, side, kind, state, dstyle, interior, cut) {
+    const key = [styleIdx, side, kind, state, dstyle, interior ? 1 : 0, cut ? 1 : 0].join(':');
+    let s = wallSprites.get(key);
+    if (s) return s;
+    if (wallBudget <= 0) return null;
+    const t0 = performance.now();
     const m = new VX.Model(); m.part('r', null, [0, 0, 0]);
-    PROPS[type].build(m, variant || 0);
-    const cv = VX.renderFit(m, {}, { scale: Math.SQRT2, yaw: -Math.PI / 4 + (rot ? Math.PI / 2 : 0), pad: 1, edge: 3 });
-    return (propSprites[key] = cv);
+    buildWall(m, styleIdx, kind, state, dstyle, interior, cut);
+    const yaw = side === 'N' ? -Math.PI / 4 : Math.PI / 4;
+    const out = VX.render(m, {}, { W: WF.W, H: WF.H, ox: WF.ox, oy: WF.oy, scale: SC, yaw, ss: 3, outline: false, dither: 0.35, ao: 0.4, inner: false });
+    const bb = VX.bbox(out, WF.W, WF.H) || { x0: 0, y0: 0, x1: 0, y1: 0 };
+    const cv = VX.toCanvas(out, WF.W, WF.H, bb);
+    cv.ox = WF.ox - bb.x0; cv.oy = WF.oy - bb.y0;
+    wallSprites.set(key, cv);
+    wallBudget -= performance.now() - t0;
+    return cv;
   }
 
-  // ---------- estado do mapa ----------
-  class Map {
+  // ---------- mapa ----------
+  class CityMap {
     constructor(seed) {
-      this.N = N;
-      this.seed = seed;
-      this.floor = new Uint8Array(N * N);
-      this.fvar = new Uint8Array(N * N);
-      this.wallN = new Uint8Array(N * N); this.wallW = new Uint8Array(N * N);
-      this.styleN = new Uint8Array(N * N); this.styleW = new Uint8Array(N * N);
-      this.doorN = new Uint8Array(N * N); this.doorW = new Uint8Array(N * N); // 0 fechada, 1 aberta, 2 quebrada
-      this.doorHpN = new Float32Array(N * N); this.doorHpW = new Float32Array(N * N);
-      this.bld = new Int16Array(N * N).fill(-1);
-      this.propAt = new Int32Array(N * N).fill(-1);
-      this.props = [];
-      this.buildings = [];
-      this.lights = [];
-      this.spawn = [36, 36];
-      generate(this, rng(seed));
+      this.N = N; this.seed = seed;
+      const A = N * N;
+      this.floor = new Uint8Array(A); this.fvar = new Uint8Array(A);
+      for (const s of ['N', 'W']) {
+        this['w' + s] = new Uint8Array(A);       // tipo
+        this['ws' + s] = new Uint8Array(A);      // estilo da face visível
+        this['wst' + s] = new Uint8Array(A);     // estado (porta: 0 fechada, 1 aberta, 2 quebrada; janela: 1 quebrada)
+        this['wd' + s] = new Uint8Array(A);      // estilo da porta
+        this['wb' + s] = new Int16Array(A).fill(-1); // prédio dono
+        this['whp' + s] = new Float32Array(A);
+      }
+      this.bld = new Int16Array(A).fill(-1);
+      this.room = new Int16Array(A).fill(-1);
+      this.propAt = new Int32Array(A).fill(-1);
+      this.props = []; this.buildings = []; this.rooms = []; this.decals = []; this.nests = []; this.spawnPts = [];
+      this.spawn = [N / 2, N / 2];
+      this.R = rng(seed);
+      generate(this);
     }
-    idx(i, j) { return j * N + i; }
     inb(i, j) { return i >= 0 && j >= 0 && i < N && j < N; }
-    prop(i, j) { if (!this.inb(i, j)) return null; const k = this.propAt[j * N + i]; return k >= 0 ? this.props[k] : null; }
+    k(i, j) { return j * N + i; }
+    prop(i, j) { if (!this.inb(i, j)) return null; const q = this.propAt[j * N + i]; return q >= 0 ? this.props[q] : null; }
     solid(i, j) { if (!this.inb(i, j)) return true; const p = this.prop(i, j); return !!(p && p.solid && !p.dead); }
-    // bloqueio de aresta: lado 'N' do tile (i,j) ou 'W'
-    edgeBlocked(i, j, side, forSight) {
+    // aresta bloqueada? side 'N' = borda norte do tile (i,j); 'W' = borda oeste
+    edge(i, j, side, mode) {
       if (!this.inb(i, j)) return false;
       const k = j * N + i;
-      const w = side === 'N' ? this.wallN[k] : this.wallW[k];
-      if (w === W_NONE) return false;
-      if (w === W_WIN) return !forSight;
-      if (w === W_DOOR) return (side === 'N' ? this.doorN[k] : this.doorW[k]) === 0;
+      const kind = this['w' + side][k];
+      if (!kind) return false;
+      const st = this['wst' + side][k];
+      if (kind === W.DOORWAY) return false;
+      if (kind === W.DOOR) return st === 0;
+      if (mode === 'sight') {
+        if (kind === W.WINDOW || kind === W.STORE) return false;
+        if (kind === W.WALL && STYLES[this['ws' + side][k]].see) return false;
+        return true;
+      }
+      if (mode === 'shot') {
+        if (kind === W.WINDOW || kind === W.STORE) return false;
+        if (kind === W.WALL && STYLES[this['ws' + side][k]].see) return STYLES[this['ws' + side][k]].id === 'muro';
+        return true;
+      }
+      if ((kind === W.STORE || kind === W.WINDOW) && st === 1) return false;
       return true;
     }
-    addProp(type, i, j, opt) {
-      opt = opt || {};
-      const def = PROPS[type];
-      const p = { type, i, j, v: opt.v || 0, rot: opt.rot || 0, solid: def.solid, loot: def.loot, items: null, name: def.name, hp: def.hp || 0, big: def.big };
-      p.x = i + 0.5; p.y = j + 0.5;
-      p.tiles = [[i, j]];
-      if (def.big) { const t2 = p.rot ? [i, j + 1] : [i + 1, j]; p.tiles.push(t2); p.x = p.rot ? i + 0.5 : i + 1; p.y = p.rot ? j + 1 : j + 0.5; }
-      for (const [a, b] of p.tiles) { if (!this.inb(a, b) || this.propAt[b * N + a] >= 0) return null; }
-      p.id = this.props.length;
+    addProp(type, i, j, o) {
+      o = o || {};
+      const d = PROPS.D[type];
+      if (!d) return null;
+      const rot = o.rot || 0;
+      const [fw, fh] = PROPS.footprint(type, rot);
+      for (let b = j; b < j + fh; b++) for (let a = i; a < i + fw; a++) if (!this.inb(a, b) || this.propAt[b * N + a] >= 0) return null;
+      const p = { id: this.props.length, type, i, j, rot, fw, fh, v: o.v || 0, solid: d.solid, loot: o.loot !== undefined ? o.loot : d.loot, items: null, hp: d.hp || 0, maxhp: d.hp || 0, name: d.name, light: d.light || null, x: i + fw / 2, y: j + fh / 2, bld: o.bld != null ? o.bld : -1, lore: d.lore };
       this.props.push(p);
-      for (const [a, b] of p.tiles) this.propAt[b * N + a] = p.id;
-      if (def.light) this.lights.push(p);
+      for (let b = j; b < j + fh; b++) for (let a = i; a < i + fw; a++) this.propAt[b * N + a] = p.id;
+      if (d.nest) this.nests.push(p);
       return p;
     }
     removeProp(p) {
-      for (const [a, b] of p.tiles) if (this.propAt[b * N + a] === p.id) this.propAt[b * N + a] = -1;
+      for (let b = p.j; b < p.j + p.fh; b++) for (let a = p.i; a < p.i + p.fw; a++) if (this.propAt[b * N + a] === p.id) this.propAt[b * N + a] = -1;
       p.dead = true;
     }
-    // pode passar de (i,j) para (i+di, j+dj)? retorna custo ou -1
+    // custo de passo para A*; breaker: zumbis arrombam portas e barricadas
     stepCost(i, j, di, dj, breaker) {
       const ti = i + di, tj = j + dj;
       if (!this.inb(ti, tj)) return -1;
       const orth = (a, b, da, db) => {
         let c = 1;
-        const na = a + da, nb = b + db;
         let side, ei, ej;
-        if (da === 1) { side = 'W'; ei = na; ej = b; } else if (da === -1) { side = 'W'; ei = a; ej = b; }
-        else if (db === 1) { side = 'N'; ei = a; ej = nb; } else { side = 'N'; ei = a; ej = b; }
-        if (this.edgeBlocked(ei, ej, side)) {
-          const k = ej * N + ei;
-          const isDoor = (side === 'N' ? this.wallN[k] : this.wallW[k]) === W_DOOR;
-          if (breaker && isDoor) c += 10; else return -1;
+        if (da === 1) { side = 'W'; ei = a + 1; ej = b; } else if (da === -1) { side = 'W'; ei = a; ej = b; }
+        else if (db === 1) { side = 'N'; ei = a; ej = b + 1; } else { side = 'N'; ei = a; ej = b; }
+        if (this.edge(ei, ej, side, 'move')) {
+          if (breaker && this['w' + side][ej * N + ei] === W.DOOR) c += 12; else return -1;
         }
-        const p = this.prop(na, nb);
-        if (p && p.solid && !p.dead) { if (breaker && p.type === 'barricada') c += 10; else return -1; }
+        const p = this.prop(a + da, b + db);
+        if (p && p.solid && !p.dead) { if (breaker && PROPS.D[p.type].built) c += 12; else return -1; }
         return c;
       };
       if (di === 0 || dj === 0) return orth(i, j, di, dj);
-      const a = orth(i, j, di, 0), b = orth(i, j, 0, dj);
-      if (a !== 1 || b !== 1) return -1;
-      const c1 = orth(i + di, j, 0, dj), c2 = orth(i, j + dj, di, 0);
-      if (c1 !== 1 || c2 !== 1) return -1;
+      if (orth(i, j, di, 0) !== 1 || orth(i, j, 0, dj) !== 1 || orth(i + di, j, 0, dj) !== 1 || orth(i, j + dj, di, 0) !== 1) return -1;
       return 1.414;
     }
-    // A* em tiles; devolve lista de [x,y]
     path(sx, sy, tx, ty, breaker, maxNodes) {
       const si = Math.floor(sx), sj = Math.floor(sy), ti = Math.floor(tx), tj = Math.floor(ty);
-      if (!this.inb(ti, tj)) return null;
-      const key = (i, j) => j * N + i;
-      const g = new Map_(), came = new Map_();
-      const open = [[0, si, sj]];
-      g.set(key(si, sj), 0);
-      let n = 0;
-      const hfn = (i, j) => Math.hypot(i - ti, j - tj);
-      while (open.length && n++ < (maxNodes || 1800)) {
-        let bi = 0; for (let q = 1; q < open.length; q++) if (open[q][0] < open[bi][0]) bi = q;
-        const [, ci, cj] = open[bi]; open[bi] = open[open.length - 1]; open.pop();
-        if (ci === ti && cj === tj) {
-          const out = []; let k = key(ci, cj);
-          while (k !== key(si, sj)) { out.push([(k % N) + 0.5, Math.floor(k / N) + 0.5]); k = came.get(k); }
-          return out.reverse();
-        }
-        const gc = g.get(key(ci, cj));
+      if (!this.inb(ti, tj) || !this.inb(si, sj)) return null;
+      const start = sj * N + si, goal = tj * N + ti;
+      const g = new globalThis.Map(), came = new globalThis.Map();
+      const heap = []; // [f, k]
+      const push = (f, k) => { heap.push([f, k]); let c = heap.length - 1; while (c > 0) { const p = (c - 1) >> 1; if (heap[p][0] <= heap[c][0]) break; [heap[p], heap[c]] = [heap[c], heap[p]]; c = p; } };
+      const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let c = 0; for (;;) { const l = 2 * c + 1, r = l + 1; let m = c; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === c) break; [heap[m], heap[c]] = [heap[c], heap[m]]; c = m; } } return top; };
+      g.set(start, 0); push(0, start);
+      let n = 0, best = start, bestH = 1e9;
+      while (heap.length && n++ < (maxNodes || 2500)) {
+        const [, cur] = pop();
+        if (cur === goal) { best = goal; break; }
+        const ci = cur % N, cj = (cur / N) | 0, gc = g.get(cur);
+        const h0 = Math.hypot(ci - ti, cj - tj);
+        if (h0 < bestH) { bestH = h0; best = cur; }
         for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
           if (!di && !dj) continue;
           const c = this.stepCost(ci, cj, di, dj, breaker);
           if (c < 0) continue;
-          const ni = ci + di, nj = cj + dj, nk = key(ni, nj), ng = gc + c;
-          if (g.has(nk) && g.get(nk) <= ng) continue;
-          g.set(nk, ng); came.set(nk, key(ci, cj));
-          open.push([ng + hfn(ni, nj), ni, nj]);
+          const nk = (cj + dj) * N + ci + di, ng = gc + c;
+          const old = g.get(nk);
+          if (old !== undefined && old <= ng) continue;
+          g.set(nk, ng); came.set(nk, cur);
+          push(ng + Math.hypot(ci + di - ti, cj + dj - tj) * 1.05, nk);
         }
       }
-      return null;
+      if (best === start) return [];
+      const out = []; let k = best;
+      while (k !== start && k !== undefined) { out.push([(k % N) + 0.5, ((k / N) | 0) + 0.5]); k = came.get(k); }
+      return out.reverse();
     }
-    // linha de visão / tiro entre dois pontos
-    los(ax, ay, bx, by, forSight) {
+    los(ax, ay, bx, by, mode) {
       const d = Math.hypot(bx - ax, by - ay);
-      const steps = Math.max(1, Math.ceil(d * 5));
+      const steps = Math.max(1, Math.ceil(d * 4));
       let pi = Math.floor(ax), pj = Math.floor(ay);
       for (let s = 1; s <= steps; s++) {
         const t = s / steps;
         const ci = Math.floor(ax + (bx - ax) * t), cj = Math.floor(ay + (by - ay) * t);
-        if (ci !== pi) { if (this.edgeBlocked(Math.max(pi, ci), pj, 'W', forSight)) return false; }
-        if (cj !== pj) { if (this.edgeBlocked(ci, Math.max(pj, cj), 'N', forSight)) return false; }
+        if (ci !== pi && this.edge(Math.max(pi, ci), pj, 'W', mode || 'sight')) return false;
+        if (cj !== pj && this.edge(ci, Math.max(pj, cj), 'N', mode || 'sight')) return false;
+        if (mode === 'shot' && (ci !== pi || cj !== pj)) { const p = this.prop(ci, cj); if (p && p.solid && !p.dead && PROPS.D[p.type].tall) return false; }
         pi = ci; pj = cj;
       }
       return true;
     }
-    // empurra um círculo para fora de paredes e objetos sólidos
     collide(e, r) {
       for (let it = 0; it < 2; it++) {
         const i0 = Math.floor(e.x) - 1, j0 = Math.floor(e.y) - 1;
         for (let j = j0; j <= j0 + 2; j++) for (let i = i0; i <= i0 + 2; i++) {
-          if (this.edgeBlocked(i, j, 'N')) pushSeg(e, i, j, i + 1, j, r);
-          if (this.edgeBlocked(i, j, 'W')) pushSeg(e, i, j, i, j + 1, r);
-          if (this.solid(i, j)) pushBox(e, i + 0.1, j + 0.1, i + 0.9, j + 0.9, r);
+          if (this.edge(i, j, 'N', 'move')) pushSeg(e, i, j, i + 1, j, r);
+          if (this.edge(i, j, 'W', 'move')) pushSeg(e, i, j, i, j + 1, r);
+          if (this.solid(i, j)) pushBox(e, i + 0.06, j + 0.06, i + 0.94, j + 0.94, r);
         }
       }
-      e.x = Math.max(0.3, Math.min(N - 0.3, e.x)); e.y = Math.max(0.3, Math.min(N - 0.3, e.y));
+      e.x = Math.max(1, Math.min(N - 1, e.x)); e.y = Math.max(1, Math.min(N - 1, e.y));
     }
+    walkable(i, j) { return this.inb(i, j) && !this.solid(i, j); }
   }
-  const Map_ = globalThis.Map;
-
   function pushSeg(e, x1, y1, x2, y2, r) {
     const dx = x2 - x1, dy = y2 - y1;
     const t = Math.max(0, Math.min(1, ((e.x - x1) * dx + (e.y - y1) * dy) / (dx * dx + dy * dy)));
@@ -370,178 +420,531 @@ const WORLD = (() => {
   }
 
   // ---------- geração ----------
-  const ROADS = [22, 23, 24, 46, 47, 48];
-  const BLOCKS = [[1, 20], [26, 44], [50, 70]];
-  const BTYPES = {
-    lab:       { style: 5, floor: F.LAB, furn: ['lab', 'lab', 'farmacia', 'geladeira', 'mesa', 'policia', 'prateleira'] },
-    casa:      { style: 0, floor: F.WOOD, furn: ['armario', 'geladeira', 'cama', 'guardaroupa', 'sofa', 'mesa'] },
-    casa2:     { style: 1, floor: F.CARPET, furn: ['armario', 'geladeira', 'cama', 'guardaroupa', 'sofa', 'mesa'] },
-    mercado:   { style: 2, floor: F.TILE, furn: ['prateleira', 'prateleira', 'prateleira', 'geladeira', 'caixa'] },
-    farmacia:  { style: 3, floor: F.LAB, furn: ['farmacia', 'farmacia', 'farmacia', 'mesa', 'geladeira'] },
-    delegacia: { style: 4, floor: F.CONCRETE, furn: ['policia', 'policia', 'mesa', 'mesa', 'caixa'] },
-    armazem:   { style: 6, floor: F.CONCRETE, furn: ['caixa', 'caixa', 'bancada', 'bancada', 'barril', 'militar'] },
-    posto:     { style: 7, floor: F.MIL, furn: ['militar', 'militar', 'policia', 'mesa'] },
-  };
-  const NAMES = { lab: 'Laboratório', casa: 'Casa', casa2: 'Casa', mercado: 'Mercado', farmacia: 'Farmácia', delegacia: 'Delegacia', armazem: 'Armazém', posto: 'Posto Militar' };
+  function generate(M) {
+    const R = M.R;
+    const ri = (a, b) => a + Math.floor(R() * (b - a + 1));
+    const pickR = (arr) => arr[Math.floor(R() * arr.length)];
+    const setF = (i, j, f) => { if (M.inb(i, j)) M.floor[j * N + i] = f; };
+    for (let k = 0; k < N * N; k++) { M.floor[k] = F.GRAMA; M.fvar[k] = Math.floor(R() * 4); }
 
-  function generate(M, R) {
-    const set = (i, j, f) => { if (M.inb(i, j)) M.floor[j * N + i] = f; };
-    for (let k = 0; k < N * N; k++) { M.floor[k] = F.GRASS; M.fvar[k] = Math.floor(R() * 4); }
-    // trilhas de terra
-    for (let k = 0; k < 6; k++) { let x = R() * N, y = R() * N, a = R() * 6; for (let s = 0; s < 40; s++) { set(Math.floor(x), Math.floor(y), F.DIRT); x += Math.cos(a); y += Math.sin(a); a += (R() - 0.5) * 0.6; } }
-    // ruas
-    for (let a = 0; a < N; a++) for (const r of ROADS) {
-      const center = r === 23 || r === 47;
-      set(r, a, center ? F.ROAD_Y : F.ASPHALT);
-      set(a, r, center ? F.ROAD_X : F.ASPHALT);
+    // ruas (corredores verticais e horizontais)
+    const roadKind = (o) => (o === 0 || o === 1 || o === 2 || o === 11 || o === 12 || o === 13 ? 'calcada' : 'rua');
+    for (let a = 0; a < N; a++) for (const c of CORS) for (let o = 0; o < COR; o++) {
+      const isRoad = roadKind(o) === 'rua';
+      // vertical: x = c+o
+      const fV = !isRoad ? F.CALCADA : o === 7 ? F.LINHA_Y : o === 3 ? F.ASFALTO : o === 10 ? F.BORDA_Y : F.ASFALTO;
+      const fH = !isRoad ? F.CALCADA : o === 7 ? F.LINHA_X : o === 10 ? F.BORDA_X : F.ASFALTO;
+      if (a >= CORS[0] && a < CORS[NB] + COR) { setF(c + o, a, fV); setF(a, c + o, fH); }
     }
-    for (const r of ROADS) for (const q of ROADS) set(r, q, F.ASPHALT);
-    for (let a = 0; a < N; a++) for (const s of [21, 25, 45, 49]) {
-      if (!ROADS.includes(a)) { set(s, a, F.SIDEWALK); set(a, s, F.SIDEWALK); }
+    // cruzamentos e faixas de pedestre
+    for (const cx of CORS) for (const cy of CORS) {
+      for (let a = 0; a < COR; a++) for (let b = 0; b < COR; b++) {
+        const ra = roadKind(a) === 'rua', rb2 = roadKind(b) === 'rua';
+        setF(cx + a, cy + b, ra || rb2 ? F.ASFALTO : F.CALCADA);
+      }
+      for (let a = 3; a <= 10; a++) {
+        for (const off of [-3, -2]) { setF(cx + a, cy + off, F.ZEBRA_Y); setF(cx + a, cy + COR - 1 - off, F.ZEBRA_Y); setF(cx + off, cy + a, F.ZEBRA_X); setF(cx + COR - 1 - off, cy + a, F.ZEBRA_X); }
+      }
     }
-    // quarteirões
+    // periferia: mata, trilhas
+    const inCity = (i, j) => i >= CORS[0] && j >= CORS[0] && i < CORS[NB] + COR && j < CORS[NB] + COR;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) if (!inCity(i, j)) setF(i, j, N3(i * 0.08, j * 0.08, 9) > 0.55 ? F.GRAMA_ALTA : F.GRAMA);
+    for (let t = 0; t < 4; t++) { let x = R() < 0.5 ? 2 : N - 3, y = ri(10, N - 10), a = x < N / 2 ? 0 : Math.PI; for (let s = 0; s < 40; s++) { for (let w = 0; w < 2; w++) if (!inCity(Math.floor(x), Math.floor(y + w))) setF(Math.floor(x), Math.floor(y + w), F.TERRA); x += Math.cos(a); y += Math.sin(a); a += (R() - 0.5) * 0.5; } }
+
+    const blockRect = (bx, by) => [CORS[bx] + COR, CORS[by] + COR, BLOCK, BLOCK];
     const plan = {
-      '1,1': ['lab', 'casa'], '0,1': ['mercado', 'casa2'], '2,1': ['farmacia', 'casa'], '1,0': ['delegacia', 'casa2'],
-      '1,2': ['armazem', 'casa'], '0,0': ['casa'], '2,2': ['casa2', 'armazem'], '0,2': ['casa'], '2,0': ['posto'],
+      '0,0': 'residencial', '1,0': 'civico', '2,0': 'industrial', '3,0': 'residencial',
+      '0,1': 'comercial', '1,1': 'lab', '2,1': 'residencial', '3,1': 'parque',
+      '0,2': 'residencial', '1,2': 'comercial2', '2,2': 'militar', '3,2': 'residencial',
+      '0,3': 'parque', '1,3': 'residencial', '2,3': 'industrial', '3,3': 'residencial',
     };
-    for (let bx = 0; bx < 3; bx++) for (let by = 0; by < 3; by++) {
-      const [x0, x1] = BLOCKS[bx], [y0, y1] = BLOCKS[by];
-      const types = plan[bx + ',' + by] || [];
-      const placed = [];
-      for (const t of types) {
-        for (let tries = 0; tries < 60; tries++) {
-          const big = t === 'lab' || t === 'mercado' || t === 'armazem' || t === 'delegacia';
-          const w = big ? 9 + Math.floor(R() * 4) : 6 + Math.floor(R() * 3);
-          const h = big ? 8 + Math.floor(R() * 3) : 6 + Math.floor(R() * 3);
-          const x = x0 + 1 + Math.floor(R() * Math.max(1, x1 - x0 - w - 2));
-          const y = y0 + 1 + Math.floor(R() * Math.max(1, y1 - y0 - h - 2));
-          if (x + w > x1 || y + h > y1) continue;
-          if (placed.some((p) => x < p[0] + p[2] + 2 && x + w + 2 > p[0] && y < p[1] + p[3] + 2 && y + h + 2 > p[1])) continue;
-          placed.push([x, y, w, h]);
-          building(M, R, t, x, y, w, h);
-          break;
-        }
-      }
+    for (let by = 0; by < NB; by++) for (let bx = 0; bx < NB; bx++) {
+      const [x0, y0] = blockRect(bx, by);
+      const kind = plan[bx + ',' + by];
+      if (kind === 'residencial') residential(M, R, x0, y0);
+      else if (kind === 'comercial') commercial(M, R, x0, y0);
+      else if (kind === 'comercial2') commercial2(M, R, x0, y0);
+      else if (kind === 'civico') civic(M, R, x0, y0);
+      else if (kind === 'industrial') industrial(M, R, x0, y0);
+      else if (kind === 'parque') park(M, R, x0, y0);
+      else if (kind === 'militar') military(M, R, x0, y0);
+      else if (kind === 'lab') labCompound(M, R, x0, y0);
     }
-    // posto militar: sacos de areia em volta
-    const posto = M.buildings.find((b) => b.type === 'posto');
-    if (posto) {
-      for (let i = posto.x - 3; i <= posto.x + posto.w + 2; i++) for (let j = posto.y - 3; j <= posto.y + posto.h + 2; j++) {
-        if (!M.inb(i, j) || M.bld[j * N + i] >= 0) continue;
-        set(i, j, F.MIL);
-        const ring = i === posto.x - 3 || i === posto.x + posto.w + 2 || j === posto.y - 3 || j === posto.y + posto.h + 2;
-        if (ring && !(Math.abs(j - (posto.y + posto.h / 2)) < 1.5) && !(Math.abs(i - (posto.x + posto.w / 2)) < 1.5)) M.addProp('sacos', i, j);
-        else if (!ring && R() < 0.12) M.addProp(R() < 0.6 ? 'militar' : 'barril', i, j, { v: 4 });
-      }
-    }
-    // carros nas ruas
-    for (let k = 0; k < 18; k++) {
-      const vertical = R() < 0.5;
-      const lane = ROADS[Math.floor(R() * ROADS.length)];
-      const a = 2 + Math.floor(R() * (N - 4));
-      if (ROADS.includes(a) || ROADS.includes(a + 1)) continue;
-      if (vertical) M.addProp('carro', lane, a, { v: Math.floor(R() * 6), rot: 1 });
-      else M.addProp('carro', a, lane, { v: Math.floor(R() * 6) });
-    }
-    // calçadas: postes e lixeiras
-    for (let a = 2; a < N - 2; a++) for (const s of [21, 25, 45, 49]) {
-      if (ROADS.includes(a)) continue;
-      if (a % 9 === 0) { M.addProp('poste', s, a); M.addProp('poste', a, s); }
-      else if (R() < 0.05) M.addProp(R() < 0.8 ? 'lixeira' : 'barril', s, a, { v: 3 });
-      else if (R() < 0.05) M.addProp('lixeira', a, s);
-    }
-    // natureza
-    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-      const k = j * N + i;
-      if (M.floor[k] !== F.GRASS && M.floor[k] !== F.DIRT) continue;
-      if (M.propAt[k] >= 0 || nearBuilding(M, i, j, 2)) continue;
-      const edge = Math.min(i, j, N - 1 - i, N - 1 - j);
-      const corner = (i < 21 || i > 49) && (j < 21 || j > 49);
-      const dens = edge < 3 ? 0.6 : corner ? 0.2 : 0.05;
-      const r = R();
-      if (r < dens) M.addProp('arvore', i, j, { v: Math.floor(R() * 6) });
-      else if (r < dens + 0.03) M.addProp('arbusto', i, j);
-      else if (r < dens + 0.035) M.addProp('caixa', i, j);
-    }
-    const lab = M.buildings.find((b) => b.type === 'lab');
-    if (lab) M.spawn = [lab.x + lab.w / 2, lab.y + lab.h / 2];
+    streets(M, R);
+    outskirts(M, R);
+    nestsAndFungus(M, R);
+    finalizeWalls(M);
   }
 
-  function nearBuilding(M, i, j, r) {
-    for (let b = j - r; b <= j + r; b++) for (let a = i - r; a <= i + r; a++) if (M.inb(a, b) && M.bld[b * N + a] >= 0) return true;
-    return false;
-  }
+  // ----- prédios -----
+  const ROOMFLOOR = { sala: F.MADEIRA, quarto: F.CARPETE, cozinha: F.COZINHA, banheiro: F.AZULEJO, escritorio: F.CARPETE_AZ, loja: F.LOJA, estoque: F.CONCRETO, lab: F.LAB, contencao: F.LAB, servidores: F.CONCRETO, enfermaria: F.HOSPITAL, recepcao: F.HOSPITAL, arsenal: F.CONCRETO, galpao: F.CONCRETO, oficina: F.CONCRETO, farmacia: F.LAB, lanchonete: F.COZINHA, corredor: F.MADEIRA_ESC };
+  const ROOMSTYLE = { sala: ['int_creme', 'int_verde', 'int_azul', 'int_papel', 'int_madeira'], quarto: ['int_rosa', 'int_azul', 'int_creme', 'int_papel'], cozinha: ['int_cozinha'], banheiro: ['int_azulejo'], escritorio: ['int_branco', 'int_madeira'], loja: ['int_branco'], estoque: ['int_concreto'], lab: ['int_lab'], contencao: ['int_lab'], servidores: ['int_concreto'], enfermaria: ['int_hospital'], recepcao: ['int_hospital'], arsenal: ['int_concreto'], galpao: ['int_concreto'], oficina: ['int_concreto'], farmacia: ['int_branco'], lanchonete: ['int_creme'], corredor: ['int_creme'] };
+  const FURN = {
+    sala: [['sofa', 1], ['poltrona', 0.7], ['tv_rack', 0.9], ['estante', 0.6], ['planta', 0.8], ['luminaria', 0.6]],
+    quarto: [['cama_casal', 0.6, 'bed'], ['cama_solteiro', 0.5, 'bed'], ['guarda_roupa', 0.9], ['comoda', 0.7], ['criado', 0.8], ['planta', 0.3], ['escrivaninha', 0.25]],
+    cozinha: [['geladeira', 1], ['fogao', 1], ['pia_cozinha', 1], ['balcao', 1], ['balcao', 0.8], ['balcao', 0.5], ['mesa_jantar', 0.6, 'center']],
+    banheiro: [['vaso', 1], ['pia_banheiro', 1], ['chuveiro', 0.7], ['banheira', 0.3], ['maquina_lavar', 0.4]],
+    escritorio: [['escrivaninha', 1], ['escrivaninha', 0.7], ['arquivo', 0.9], ['estante', 0.5], ['planta', 0.5], ['arquivo', 0.4]],
+    loja: [['freezer', 0.9], ['freezer', 0.6], ['caixa_registradora', 1], ['prateleira_mercado', 1, 'aisles']],
+    farmacia: [['estante_farmacia', 1], ['estante_farmacia', 1], ['estante_farmacia', 0.8], ['balcao_loja', 1], ['estante_farmacia', 0.6]],
+    lanchonete: [['balcao_loja', 1], ['fogao', 1], ['geladeira', 1], ['freezer', 0.7], ['mesa_lanchonete', 1, 'scatter'], ['mesa_lanchonete', 1, 'scatter'], ['mesa_lanchonete', 0.8, 'scatter'], ['mesa_lanchonete', 0.6, 'scatter']],
+    estoque: [['caixa_papelao', 1], ['caixa', 0.8], ['palete', 0.8], ['prateleira_mercado', 0.6], ['caixa_papelao', 0.8], ['armario_metal', 0.6]],
+    lab: [['bancada_lab', 1], ['bancada_lab', 0.9], ['armario_lab', 1], ['escrivaninha', 0.7, null, 2], ['tanque', 0.6], ['servidor', 0.4], ['armario_lab', 0.5]],
+    contencao: [['tanque', 1], ['tanque', 1], ['tanque', 0.8], ['bancada_lab', 0.7], ['armario_lab', 0.5]],
+    servidores: [['servidor', 1], ['servidor', 1], ['servidor', 0.9], ['servidor', 0.8], ['escrivaninha', 0.6, null, 2]],
+    enfermaria: [['maca', 1, 'beds'], ['armario_metal', 0.8, null, 0, 'hospital'], ['estante_farmacia', 0.6], ['planta', 0.3]],
+    recepcao: [['balcao_loja', 1], ['cadeiras_espera', 1], ['cadeiras_espera', 0.8], ['planta', 0.7], ['arquivo', 0.5]],
+    arsenal: [['armario_armas', 1], ['armario_armas', 0.9], ['caixa_militar', 0.6], ['arquivo', 0.5]],
+    galpao: [['prateleira_industrial', 1, 'racks'], ['palete', 0.8, 'scatter'], ['caixa', 0.8, 'scatter'], ['barril', 0.8, 'scatter'], ['caixa_papelao', 0.8, 'scatter'], ['pneus', 0.5, 'scatter']],
+    oficina: [['bancada_ferramentas', 1], ['bancada_ferramentas', 0.6], ['armario_metal', 0.8], ['pneus', 0.8], ['barril', 0.7], ['carro', 0.7, 'center']],
+    corredor: [['planta', 0.4]],
+  };
+  const BTYPES = {
+    casa: { ext: ['siding_azul', 'siding_creme', 'siding_verde', 'siding_amarelo', 'tijolo', 'reboco_rosa'], roof: 'gable', maxRoom: 26, minRoom: 4 },
+    mercado: { ext: ['concreto', 'tijolo_cinza'], roof: 'flat', store: 1, main: 'loja', back: ['estoque', 'escritorio', 'banheiro'] },
+    farmacia: { ext: ['azulejo_ext', 'concreto'], roof: 'flat', store: 1, main: 'farmacia', back: ['estoque', 'banheiro'] },
+    lanchonete: { ext: ['reboco_rosa', 'tijolo'], roof: 'flat', store: 1, main: 'lanchonete', back: ['cozinha', 'banheiro'] },
+    escritorios: { ext: ['concreto', 'tijolo_cinza'], roof: 'flat', maxRoom: 36, minRoom: 5, rooms: ['escritorio', 'escritorio', 'banheiro', 'recepcao'] },
+    delegacia: { ext: ['tijolo_cinza', 'concreto'], roof: 'flat', maxRoom: 48, minRoom: 5, rooms: ['recepcao', 'escritorio', 'arsenal', 'escritorio', 'banheiro', 'escritorio'] },
+    hospital: { ext: ['azulejo_ext'], roof: 'flat', maxRoom: 50, minRoom: 5, rooms: ['recepcao', 'enfermaria', 'enfermaria', 'enfermaria', 'escritorio', 'banheiro', 'farmacia', 'enfermaria'] },
+    armazem: { ext: ['metal', 'metal_azul'], roof: 'flat', maxRoom: 9999, rooms: ['galpao'], office: 1 },
+    oficina: { ext: ['metal', 'tijolo'], roof: 'flat', maxRoom: 9999, rooms: ['oficina'], garage: 1 },
+    lab: { ext: ['azulejo_ext'], roof: 'flat', maxRoom: 54, minRoom: 5, rooms: ['lab', 'escritorio', 'contencao', 'lab', 'servidores', 'banheiro', 'lab', 'escritorio'] },
+    apartamentos: { ext: ['tijolo', 'concreto'], roof: 'flat', maxRoom: 22, minRoom: 4, rooms: ['sala', 'quarto', 'cozinha', 'banheiro', 'quarto', 'sala', 'cozinha', 'quarto'] },
+    posto: { ext: ['concreto'], roof: 'flat', maxRoom: 9999, rooms: ['arsenal'] },
+  };
 
-  function building(M, R, type, x, y, w, h) {
+  function building(M, R, type, x, y, w, h, front, opts) {
+    opts = opts || {};
     const T = BTYPES[type];
     const id = M.buildings.length;
-    const B = { id, type, name: NAMES[type], x, y, w, h, style: T.style };
+    const ext = S[T.ext[Math.floor(R() * T.ext.length)]];
+    const B = { id, type, x, y, w, h, front, ext, roof: T.roof, roofC: Math.floor(R() * 4), rooms: [] };
     M.buildings.push(B);
-    for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) { M.floor[j * N + i] = T.floor; M.bld[j * N + i] = id; }
-    const setN = (i, j, k) => { if (!M.inb(i, j)) return; M.wallN[j * N + i] = k; M.styleN[j * N + i] = T.style; M.doorHpN[j * N + i] = 80; };
-    const setW = (i, j, k) => { if (!M.inb(i, j)) return; M.wallW[j * N + i] = k; M.styleW[j * N + i] = T.style; M.doorHpW[j * N + i] = 80; };
-    for (let i = x; i < x + w; i++) { setN(i, y, W_WALL); setN(i, y + h, W_WALL); }
-    for (let j = y; j < y + h; j++) { setW(x, j, W_WALL); setW(x + w, j, W_WALL); }
-    const clear = new Set();
-    const keep = (i, j) => { for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) clear.add((j + b) * N + i + a); };
-    // porta da frente: lado mais perto de uma rua
-    const cx = x + w / 2, cy = y + h / 2;
-    const dist = (v) => Math.min(...[23, 47].map((r) => Math.abs(r - v)));
-    const sides = [
-      { s: 'S', d: Math.min(...[23, 47].filter((r) => r > cy).map((r) => r - (y + h)), 99) },
-      { s: 'N', d: Math.min(...[23, 47].filter((r) => r < cy).map((r) => y - r), 99) },
-      { s: 'E', d: Math.min(...[23, 47].filter((r) => r > cx).map((r) => r - (x + w)), 99) },
-      { s: 'W', d: Math.min(...[23, 47].filter((r) => r < cx).map((r) => x - r), 99) },
-    ].sort((a, b) => a.d - b.d);
-    void dist;
-    const door = (side) => {
-      const open = R() < 0.3 ? 1 : 0;
-      if (side === 'S' || side === 'N') {
-        const i = x + 1 + Math.floor(R() * (w - 2)), j = side === 'S' ? y + h : y;
-        setN(i, j, W_DOOR); M.doorN[j * N + i] = open; keep(i, j); keep(i, j - 1);
+    for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) { M.bld[j * N + i] = id; M.floor[j * N + i] = F.MADEIRA; if (M.propAt[j * N + i] >= 0) { const p = M.prop(i, j); if (p) M.removeProp(p); } }
+    const setN = (i, j, kind) => { if (!M.inb(i, j)) return; const k = j * N + i; M.wN[k] = kind; M.wbN[k] = id; M.whpN[k] = 90; };
+    const setW = (i, j, kind) => { if (!M.inb(i, j)) return; const k = j * N + i; M.wW[k] = kind; M.wbW[k] = id; M.whpW[k] = 90; };
+    for (let i = x; i < x + w; i++) { setN(i, y, W.WALL); setN(i, y + h, W.WALL); }
+    for (let j = y; j < y + h; j++) { setW(x, j, W.WALL); setW(x + w, j, W.WALL); }
+    // cômodos
+    const rooms = [];
+    const doors = [];
+    const addDoor = (side, i, j, kind, ds) => { if (side === 'N') { setN(i, j, kind); M.wstN[j * N + i] = kind === W.DOOR ? (R() < 0.55 ? 1 : 0) : 0; M.wdN[j * N + i] = ds; } else { setW(i, j, kind); M.wstW[j * N + i] = kind === W.DOOR ? (R() < 0.55 ? 1 : 0) : 0; M.wdW[j * N + i] = ds; } doors.push([side, i, j]); };
+    const intDoorStyle = Math.floor(R() * 2);
+    function split(r, depth) {
+      const maxA = T.maxRoom || 30, mn = T.minRoom || 4;
+      if (r.w * r.h <= maxA || (r.w < mn * 2 && r.h < mn * 2) || depth > 6) { rooms.push(r); return; }
+      let vert = r.w > r.h * 1.2 ? true : r.h > r.w * 1.2 ? false : R() < 0.5;
+      if (vert && r.w < mn * 2) vert = false; if (!vert && r.h < mn * 2) vert = true;
+      if (vert) {
+        const s = r.x + mn + Math.floor(R() * (r.w - 2 * mn + 1));
+        for (let j = r.y; j < r.y + r.h; j++) setW(s, j, W.WALL);
+        addDoor('W', s, r.y + 1 + Math.floor(R() * Math.max(1, r.h - 2)), R() < 0.75 ? W.DOOR : W.DOORWAY, intDoorStyle);
+        split({ x: r.x, y: r.y, w: s - r.x, h: r.h }, depth + 1); split({ x: s, y: r.y, w: r.x + r.w - s, h: r.h }, depth + 1);
       } else {
-        const j = y + 1 + Math.floor(R() * (h - 2)), i = side === 'E' ? x + w : x;
-        setW(i, j, W_DOOR); M.doorW[j * N + i] = open; keep(i, j); keep(i - 1, j);
+        const s = r.y + mn + Math.floor(R() * (r.h - 2 * mn + 1));
+        for (let i = r.x; i < r.x + r.w; i++) setN(i, s, W.WALL);
+        addDoor('N', r.x + 1 + Math.floor(R() * Math.max(1, r.w - 2)), s, R() < 0.75 ? W.DOOR : W.DOORWAY, intDoorStyle);
+        split({ x: r.x, y: r.y, w: r.w, h: s - r.y }, depth + 1); split({ x: r.x, y: s, w: r.w, h: r.y + r.h - s }, depth + 1);
       }
-    };
-    door(sides[0].s);
-    if (R() < 0.6) door(sides[2].s);
-    // divisórias internas
-    if (w >= 9) {
-      const sx = x + 3 + Math.floor(R() * (w - 6));
-      const gap = y + 1 + Math.floor(R() * (h - 2));
-      for (let j = y; j < y + h; j++) if (j !== gap) setW(sx, j, W_WALL);
-      keep(sx, gap); keep(sx - 1, gap);
-      if (h >= 8) {
-        const sy = y + 3 + Math.floor(R() * (h - 6));
-        const g2 = sx + 1 + Math.floor(R() * Math.max(1, x + w - sx - 2));
-        for (let i = sx; i < x + w; i++) if (i !== g2) setN(i, sy, W_WALL);
-        keep(g2, sy); keep(g2, sy - 1);
+    }
+    const frontVert = front === 'N' || front === 'S';
+    if (T.store) {
+      // salão da frente + fundos
+      const depthMain = Math.max(6, Math.floor((frontVert ? h : w) * 0.66));
+      let main, back;
+      if (front === 'N') { main = { x, y, w, h: depthMain }; back = { x, y: y + depthMain, w, h: h - depthMain }; for (let i = x; i < x + w; i++) setN(i, y + depthMain, W.WALL); addDoor('N', x + 1 + Math.floor(R() * (w - 2)), y + depthMain, W.DOOR, 3); }
+      else if (front === 'S') { back = { x, y, w, h: h - depthMain }; main = { x, y: y + h - depthMain, w, h: depthMain }; for (let i = x; i < x + w; i++) setN(i, main.y, W.WALL); addDoor('N', x + 1 + Math.floor(R() * (w - 2)), main.y, W.DOOR, 3); }
+      else if (front === 'W') { main = { x, y, w: depthMain, h }; back = { x: x + depthMain, y, w: w - depthMain, h }; for (let j = y; j < y + h; j++) setW(x + depthMain, j, W.WALL); addDoor('W', x + depthMain, y + 1 + Math.floor(R() * (h - 2)), W.DOOR, 3); }
+      else { back = { x, y, w: w - depthMain, h }; main = { x: x + w - depthMain, y, w: depthMain, h }; for (let j = y; j < y + h; j++) setW(main.x, j, W.WALL); addDoor('W', main.x, y + 1 + Math.floor(R() * (h - 2)), W.DOOR, 3); }
+      main.type = T.main; rooms.push(main);
+      const sub = [];
+      const pushR = (r) => sub.push(r);
+      // divide fundos em 2-3
+      const bv = back.w >= back.h;
+      const cuts = Math.min(T.back.length, Math.max(1, Math.floor((bv ? back.w : back.h) / 5)));
+      let acc = bv ? back.x : back.y;
+      for (let c = 0; c < cuts; c++) {
+        const end = c === cuts - 1 ? (bv ? back.x + back.w : back.y + back.h) : acc + Math.floor((bv ? back.w : back.h) / cuts);
+        const r = bv ? { x: acc, y: back.y, w: end - acc, h: back.h } : { x: back.x, y: acc, w: back.w, h: end - acc };
+        if (c > 0) { if (bv) { for (let j = back.y; j < back.y + back.h; j++) setW(acc, j, W.WALL); addDoor('W', acc, back.y + Math.floor(back.h / 2), W.DOOR, intDoorStyle); } else { for (let i = back.x; i < back.x + back.w; i++) setN(i, acc, W.WALL); addDoor('N', back.x + Math.floor(back.w / 2), acc, W.DOOR, intDoorStyle); } }
+        r.type = T.back[c]; pushR(r); acc = end;
       }
-    } else if (h >= 8) {
-      const sy = y + 3 + Math.floor(R() * (h - 6));
-      const gap = x + 1 + Math.floor(R() * (w - 2));
-      for (let i = x; i < x + w; i++) if (i !== gap) setN(i, sy, W_WALL);
-      keep(gap, sy); keep(gap, sy - 1);
+      // portas de comunicação extras do salão com cada sala de fundo
+      sub.forEach((r) => rooms.push(r));
+    } else if (T.office) {
+      const ow = Math.min(7, Math.floor(w / 3));
+      for (let j = y; j < y + h; j++) setW(x + w - ow, j, W.WALL);
+      const oh = Math.min(6, Math.floor(h / 2));
+      for (let i = x + w - ow; i < x + w; i++) setN(i, y + oh, W.WALL);
+      addDoor('W', x + w - ow, y + 2, W.DOOR, 3);
+      rooms.push({ x, y, w: w - ow, h, type: 'galpao' }, { x: x + w - ow, y, w: ow, h: oh, type: 'escritorio' }, { x: x + w - ow, y: y + oh, w: ow, h: h - oh, type: 'estoque' });
+      addDoor('N', x + w - ow + 2, y + oh, W.DOOR, 3);
+    } else split({ x, y, w, h }, 0);
+    // tipos de cômodo
+    if (type === 'casa' || type === 'apartamentos') {
+      rooms.sort((a, b) => a.w * a.h - b.w * b.h);
+      const nr = rooms.length;
+      rooms.forEach((r, k) => { r.type = k === 0 && nr > 2 ? 'banheiro' : 'quarto'; });
+      const big = rooms.slice().sort((a, b) => b.w * b.h - a.w * a.h);
+      if (big[0]) big[0].type = 'sala';
+      const kitchen = big.find((r) => r.type === 'quarto' && r.w * r.h >= 16);
+      if (kitchen) kitchen.type = 'cozinha';
+      if (type === 'apartamentos') rooms.forEach((r, k) => { if (r.type === 'quarto' && k % 3 === 1) r.type = pickR2(R, ['sala', 'cozinha', 'quarto']); });
+    } else if (!T.store && !T.office) {
+      const list = T.rooms;
+      rooms.forEach((r, k) => { r.type = r.type || list[k % list.length]; });
+      if (type === 'lab') { const big = rooms.slice().sort((a, b) => b.w * b.h - a.w * a.h); big[0].type = 'lab'; }
+    }
+    // registra cômodos
+    for (const r of rooms) {
+      r.id = M.rooms.length; r.bld = id;
+      M.rooms.push(r); B.rooms.push(r);
+      const style = S[pickR2(R, ROOMSTYLE[r.type] || ['int_creme'])];
+      r.style = style;
+      for (let j = r.y; j < r.y + r.h; j++) for (let i = r.x; i < r.x + r.w; i++) { M.room[j * N + i] = r.id; M.floor[j * N + i] = ROOMFLOOR[r.type] != null ? ROOMFLOOR[r.type] : F.MADEIRA; }
+      if (r.type === 'quarto' && R() < 0.5) for (let j = r.y; j < r.y + r.h; j++) for (let i = r.x; i < r.x + r.w; i++) M.floor[j * N + i] = R() < 0 ? 0 : (r.id % 3 === 0 ? F.CARPETE_VI : r.id % 3 === 1 ? F.MADEIRA : F.CARPETE_AZ);
+    }
+    // porta da frente
+    const ds = opts.doorStyle != null ? opts.doorStyle : T.store ? 2 : Math.floor(R() * 6);
+    const frontRoom = (pos) => M.rooms[M.room[pos]];
+    let fdi, fdj;
+    if (front === 'N' || front === 'S') {
+      const j = front === 'N' ? y : y + h;
+      const inner = front === 'N' ? y : y + h - 1;
+      let best = x + Math.floor(w / 2);
+      const cand = []; for (let i = x + 1; i < x + w - 1; i++) { const r = frontRoom(inner * N + i); if (r && (r.type === 'sala' || r.type === 'loja' || r.type === 'recepcao' || r.type === T.main || r.type === 'galpao' || r.type === 'oficina' || r.type === 'lab' || r.type === 'arsenal')) cand.push(i); }
+      if (cand.length) best = cand[Math.floor(cand.length / 2)];
+      fdi = best; fdj = j;
+      addDoor('N', best, j, T.garage ? W.GARAGE : W.DOOR, ds);
+      if (T.garage) addDoor('N', best + 2 < x + w - 1 ? best + 2 : best - 2, j, W.DOOR, 3);
+      if (T.store) for (let i = x + 1; i < x + w - 1; i++) if (Math.abs(i - best) > 1 && M.wN[j * N + i] === W.WALL && frontRoom(inner * N + i) && frontRoom(inner * N + i).type === T.main) M.wN[j * N + i] = W.STORE;
+    } else {
+      const i = front === 'W' ? x : x + w;
+      const inner = front === 'W' ? x : x + w - 1;
+      let best = y + Math.floor(h / 2);
+      const cand = []; for (let j = y + 1; j < y + h - 1; j++) { const r = frontRoom(j * N + inner); if (r && (r.type === 'sala' || r.type === 'loja' || r.type === 'recepcao' || r.type === T.main || r.type === 'galpao' || r.type === 'oficina' || r.type === 'lab' || r.type === 'arsenal')) cand.push(j); }
+      if (cand.length) best = cand[Math.floor(cand.length / 2)];
+      fdi = i; fdj = best;
+      addDoor('W', i, best, T.garage ? W.GARAGE : W.DOOR, ds);
+      if (T.garage) addDoor('W', i, best + 2 < y + h - 1 ? best + 2 : best - 2, W.DOOR, 3);
+      if (T.store) for (let j = y + 1; j < y + h - 1; j++) if (Math.abs(j - best) > 1 && M.wW[j * N + i] === W.WALL && frontRoom(j * N + inner) && frontRoom(j * N + inner).type === T.main) M.wW[j * N + i] = W.STORE;
+    }
+    B.door = [fdi, fdj, front];
+    // porta dos fundos
+    if (R() < 0.6 || type === 'hospital' || type === 'delegacia') {
+      const back = { N: 'S', S: 'N', W: 'E', E: 'W' }[front];
+      if (back === 'N' || back === 'S') { const j = back === 'N' ? y : y + h; addDoor('N', x + 1 + Math.floor(R() * (w - 2)), j, W.DOOR, ds); }
+      else { const i = back === 'W' ? x : x + w; addDoor('W', i, y + 1 + Math.floor(R() * (h - 2)), W.DOOR, ds); }
     }
     // janelas
-    for (let i = x; i < x + w; i++) for (const j of [y, y + h]) if (M.wallN[j * N + i] === W_WALL && R() < 0.3 && !clear.has(j * N + i)) setN(i, j, W_WIN);
-    for (let j = y; j < y + h; j++) for (const i of [x, x + w]) if (M.wallW[j * N + i] === W_WALL && R() < 0.3 && !clear.has(j * N + i)) setW(i, j, W_WIN);
-    // móveis encostados nas paredes
-    for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) {
-      const k = j * N + i;
-      if (clear.has(k)) continue;
-      const nearWall = M.wallN[k] || M.wallW[k] || (j + 1 < N && M.wallN[k + N]) || (i + 1 < N && M.wallW[k + 1]);
-      if (!nearWall) continue;
-      if (R() < (type === 'mercado' || type === 'armazem' ? 0.45 : 0.3)) {
-        const f = T.furn[Math.floor(R() * T.furn.length)];
-        M.addProp(f, i, j, { v: Math.floor(R() * 5) });
-      }
-    }
-    // mercado: gôndolas no meio
-    if (type === 'mercado') for (let j = y + 2; j < y + h - 2; j += 3) for (let i = x + 2; i < x + w - 2; i++) if (!clear.has(j * N + i) && R() < 0.6) M.addProp('prateleira', i, j);
+    const nearDoor = (side, i, j) => doors.some(([s, a, b]) => s === side && Math.abs(a - i) + Math.abs(b - j) <= 1);
+    const winP = type === 'armazem' || type === 'oficina' ? 0.12 : 0.42;
+    for (let i = x + 1; i < x + w - 1; i++) for (const j of [y, y + h]) if (M.wN[j * N + i] === W.WALL && !nearDoor('N', i, j) && R() < winP) M.wN[j * N + i] = W.WINDOW;
+    for (let j = y + 1; j < y + h - 1; j++) for (const i of [x, x + w]) if (M.wW[j * N + i] === W.WALL && !nearDoor('W', i, j) && R() < winP) M.wW[j * N + i] = W.WINDOW;
+    // estado inicial: algumas janelas quebradas, portas externas fechadas
+    for (const [s, i, j] of doors) { const k = j * N + i; if (M['w' + s][k] === W.DOOR && M.bld[k] !== M.bld[s === 'N' ? k - N : k - 1]) M['wst' + s][k] = R() < 0.25 ? 1 : 0; }
+    // mobília
+    const reserved = new Set();
+    for (const [s, i, j] of doors) { const k = j * N + i; reserved.add(k); reserved.add(s === 'N' ? k - N : k - 1); for (const d of [1, -1]) { if (s === 'N') { reserved.add(k + d); reserved.add(k - N + d); } else { reserved.add(k + d * N); reserved.add(k - 1 + d * N); } } }
+    for (const r of rooms) furnish(M, R, r, reserved, id);
     return B;
   }
+  function pickR2(R, arr) { return arr[Math.floor(R() * arr.length)]; }
 
-  return { TW, TH, WALL_H, N, F, W_NONE, W_WALL, W_WIN, W_DOOR, PROPS, STYLES, iso, unIso, rng, Map, floorSprite, wallSprite, propSprite };
+  function furnish(M, R, r, reserved, bid) {
+    const list = FURN[r.type] || [];
+    const free = (i, j, fw, fh) => {
+      for (let b = j; b < j + fh; b++) for (let a = i; a < i + fw; a++) {
+        if (a < r.x || b < r.y || a >= r.x + r.w || b >= r.y + r.h) return false;
+        const k = b * N + a; if (reserved.has(k) || M.propAt[k] >= 0) return false;
+      }
+      return true;
+    };
+    const place = (type, i, j, rot, v, loot) => { const p = M.addProp(type, i, j, { rot, v, bld: bid, loot: loot !== undefined ? loot : undefined }); return p; };
+    for (const [type, prob, mode, vfix, lootK] of list) {
+      if (R() > prob) continue;
+      const v = vfix != null ? vfix : Math.floor(R() * 8);
+      const loot = lootK || undefined;
+      if (mode === 'center') {
+        const [fw, fh] = PROPS.footprint(type, 0);
+        const i = r.x + Math.floor((r.w - fw) / 2), j = r.y + Math.floor((r.h - fh) / 2);
+        if (r.w >= fw + 2 && r.h >= fh + 2 && free(i, j, fw, fh)) place(type, i, j, 0, v, loot);
+        continue;
+      }
+      if (mode === 'aisles' || mode === 'racks' || mode === 'beds') {
+        const [fw, fh] = PROPS.footprint(type, 0);
+        const stepJ = mode === 'beds' ? 0 : fh + 2;
+        if (mode === 'beds') {
+          for (let i = r.x + 1; i + fw <= r.x + r.w - 1; i += fw + 1) { if (free(i, r.y, fw, PROPS.footprint(type, 0)[1])) place(type, i, r.y, 0, v); }
+        } else for (let j = r.y + 2; j + fh <= r.y + r.h - 2; j += stepJ) for (let i = r.x + 2; i + fw <= r.x + r.w - 2; i += fw) if (free(i, j, fw, fh)) place(type, i, j, j % 2 ? 0 : 2, v + i);
+        continue;
+      }
+      if (mode === 'scatter') {
+        for (let t = 0; t < 6; t++) { const i = r.x + 1 + Math.floor(R() * Math.max(1, r.w - 2)), j = r.y + 1 + Math.floor(R() * Math.max(1, r.h - 2)); if (free(i, j, 1, 1) && free(i - 1, j - 1, 3, 3)) { place(type, i, j, Math.floor(R() * 4), v); break; } }
+        continue;
+      }
+      // encostado numa parede, de frente para o cômodo
+      const order = [0, 1, 2, 3].sort(() => R() - 0.5);
+      let done = false;
+      for (const wall of order) {
+        if (done) break;
+        const rot = [0, 1, 2, 3][wall]; // 0: parede N (frente p/ sul), 1: parede O, 2: parede S, 3: parede L
+        const [fw, fh] = PROPS.footprint(type, rot);
+        const cands = [];
+        if (wall === 0) for (let i = r.x; i + fw <= r.x + r.w; i++) cands.push([i, r.y]);
+        if (wall === 2) for (let i = r.x; i + fw <= r.x + r.w; i++) cands.push([i, r.y + r.h - fh]);
+        if (wall === 1) for (let j = r.y; j + fh <= r.y + r.h; j++) cands.push([r.x, j]);
+        if (wall === 3) for (let j = r.y; j + fh <= r.y + r.h; j++) cands.push([r.x + r.w - fw, j]);
+        for (let t = cands.length - 1; t > 0; t--) { const q = Math.floor(R() * (t + 1)); [cands[t], cands[q]] = [cands[q], cands[t]]; }
+        for (const [i, j] of cands) if (free(i, j, fw, fh)) { place(type, i, j, rot, v, loot); done = true; break; }
+      }
+    }
+    // tapete
+    if ((r.type === 'sala' || r.type === 'quarto' || r.type === 'escritorio') && r.w >= 5 && r.h >= 5 && R() < 0.75) {
+      const rw = Math.min(4, r.w - 2), rh = Math.min(3, r.h - 2);
+      M.decals.push({ k: 'tapete', x: r.x + Math.floor((r.w - rw) / 2), y: r.y + Math.floor((r.h - rh) / 2), w: rw, h: rh, v: Math.floor(R() * 6) });
+    }
+  }
+
+  // ----- quarteirões -----
+  function lotsRow(R, x0, w, minW, maxW) {
+    const out = []; let x = x0;
+    while (x < x0 + w) { let lw = minW + Math.floor(R() * (maxW - minW + 1)); if (x0 + w - (x + lw) < minW) lw = x0 + w - x; out.push([x, lw]); x += lw; }
+    return out;
+  }
+  function fenceN(M, i, j, st) { if (M.inb(i, j) && !M.wN[j * N + i]) { M.wN[j * N + i] = W.WALL; M.wsN[j * N + i] = st; M.wbN[j * N + i] = -1; } }
+  function fenceW(M, i, j, st) { if (M.inb(i, j) && !M.wW[j * N + i]) { M.wW[j * N + i] = W.WALL; M.wsW[j * N + i] = st; M.wbW[j * N + i] = -1; } }
+  function gate(M, side, i, j) { const k = j * N + i; M['w' + side][k] = W.DOOR; M['wst' + side][k] = 1; M['wd' + side][k] = 0; }
+
+  function residential(M, R, x0, y0) {
+    for (const row of [0, 1]) {
+      const ly = y0 + row * 20, front = row === 0 ? 'N' : 'S';
+      for (const [lx, lw] of lotsRow(R, x0, BLOCK, 10, 13)) {
+        const fenceSt = R() < 0.5 ? S.cerca_madeira : S.cerca_arame;
+        // cerca do lote (laterais e fundos)
+        if (front === 'N') { for (let j = ly + 2; j < ly + 20; j++) { fenceW(M, lx, j, fenceSt); fenceW(M, lx + lw, j, fenceSt); } for (let i = lx; i < lx + lw; i++) fenceN(M, i, ly + 20, fenceSt); }
+        else { for (let j = ly; j < ly + 18; j++) { fenceW(M, lx, j, fenceSt); fenceW(M, lx + lw, j, fenceSt); } for (let i = lx; i < lx + lw; i++) fenceN(M, i, ly, fenceSt); }
+        if (R() < 0.12) { // terreno baldio
+          for (let t = 0; t < 6; t++) M.addProp(R() < 0.5 ? 'arvore' : 'arbusto', lx + 1 + Math.floor(R() * (lw - 2)), ly + 2 + Math.floor(R() * 16), { v: Math.floor(R() * 3) });
+          for (let j = ly; j < ly + 20; j++) for (let i = lx; i < lx + lw; i++) if (R() < 0.6) M.floor[j * N + i] = F.GRAMA_ALTA;
+          continue;
+        }
+        const hw = Math.max(7, lw - 2 - Math.floor(R() * 2)), hh = 10 + Math.floor(R() * 3);
+        const hx = lx + 1 + Math.floor(R() * (lw - hw - 1));
+        const hy = front === 'N' ? ly + 3 : ly + 20 - 3 - hh;
+        // entrada de carro e calçada até a porta
+        building(M, R, 'casa', hx, hy, hw, hh, front);
+        const B = M.buildings[M.buildings.length - 1];
+        const di = B.door[0];
+        const path0 = front === 'N' ? [ly, hy] : [hy + hh, ly + 20];
+        for (let j = path0[0]; j < path0[1]; j++) M.floor[j * N + di] = F.CALCADA;
+        // carro na garagem descoberta
+        const side = hx - lx >= 3 ? lx + 1 : hx + hw + 1 <= lx + lw - 2 ? hx + hw : -1;
+        if (side >= 0 && R() < 0.5) {
+          const cy = front === 'N' ? ly : ly + 20 - 6;
+          for (let j = cy; j < cy + 6; j++) for (let i = side; i < side + 2; i++) if (M.bld[j * N + i] < 0) M.floor[j * N + i] = F.CONCRETO;
+          if (R() < 0.7) M.addProp('carro', side, cy + (front === 'N' ? 0 : 1), { v: Math.floor(R() * 8), rot: front === 'N' ? 0 : 2 });
+        }
+        // quintal
+        const by0 = front === 'N' ? hy + hh + 1 : ly + 1, by1 = front === 'N' ? ly + 19 : hy - 1;
+        for (let t = 0; t < 3; t++) {
+          const i = lx + 1 + Math.floor(R() * (lw - 2)), j = by0 + Math.floor(R() * Math.max(1, by1 - by0));
+          M.addProp(pickR2(R, ['arvore', 'arbusto', 'lixeira', 'palete', 'pneus', 'caixa_papelao', 'sacos_lixo', 'arbusto']), i, j, { v: Math.floor(R() * 4) });
+        }
+        M.addProp('ar_cond', hx + hw, hy + 2 + Math.floor(R() * (hh - 4)), { rot: 1 });
+        // jardim da frente
+        if (R() < 0.6) M.addProp(R() < 0.6 ? 'arbusto' : 'arvore', lx + 1, front === 'N' ? ly + 1 : ly + 18, { v: Math.floor(R() * 3) });
+        if (R() < 0.5) M.addProp('lixeira', di + 1, front === 'N' ? ly : ly + 19, {});
+        M.spawnPts.push([hx + hw / 2, hy + hh / 2]);
+      }
+    }
+  }
+  function commercial(M, R, x0, y0) {
+    // frente norte: mercado + farmácia; frente sul: lanchonete + escritórios; estacionamento no meio
+    building(M, R, 'mercado', x0 + 1, y0, 22, 14, 'N');
+    building(M, R, 'farmacia', x0 + 25, y0, 14, 12, 'N');
+    building(M, R, 'lanchonete', x0 + 1, y0 + 28, 14, 12, 'S');
+    building(M, R, 'escritorios', x0 + 18, y0 + 26, 21, 14, 'S');
+    parking(M, R, x0 + 1, y0 + 16, 38, 9);
+    for (const [i, j] of [[x0 + 24, y0 + 13], [x0 + 15, y0 + 26]]) M.addProp('cacamba', i, j, { v: Math.floor(R() * 3) });
+    for (let t = 0; t < 8; t++) M.addProp(pickR2(R, ['sacos_lixo', 'caixa_papelao', 'palete', 'lixeira']), x0 + 2 + Math.floor(R() * 36), y0 + 14 + Math.floor(R() * 2), { v: Math.floor(R() * 4) });
+  }
+  function commercial2(M, R, x0, y0) {
+    building(M, R, 'lanchonete', x0 + 1, y0, 12, 12, 'N');
+    building(M, R, 'escritorios', x0 + 15, y0, 24, 14, 'N');
+    building(M, R, 'mercado', x0 + 1, y0 + 26, 22, 14, 'S');
+    building(M, R, 'farmacia', x0 + 25, y0 + 28, 14, 12, 'S');
+    parking(M, R, x0 + 1, y0 + 15, 38, 9);
+    for (const [i, j] of [[x0 + 13, y0 + 13], [x0 + 24, y0 + 25]]) M.addProp('cacamba', i, j, { v: Math.floor(R() * 3) });
+    for (let t = 0; t < 10; t++) M.addProp(pickR2(R, ['sacos_lixo', 'caixa_papelao', 'palete', 'lixeira', 'barril']), x0 + 2 + Math.floor(R() * 36), y0 + 24 + Math.floor(R() * 2), { v: Math.floor(R() * 4) });
+  }
+  function parking(M, R, x, y, w, h) {
+    for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (M.bld[j * N + i] < 0) M.floor[j * N + i] = (i - x) % 3 === 0 && (j - y < 5 || j - y > h - 6) ? F.VAGA : F.ASFALTO;
+    for (let i = x + 1; i + 2 < x + w; i += 3) {
+      if (R() < 0.45) M.addProp(R() < 0.85 ? 'carro' : 'van', i, y, { v: Math.floor(R() * 8), rot: R() < 0.5 ? 0 : 2 });
+    }
+  }
+  function civic(M, R, x0, y0) {
+    building(M, R, 'delegacia', x0 + 1, y0, 20, 15, 'N');
+    building(M, R, 'hospital', x0 + 1, y0 + 20, 38, 20, 'S');
+    parking(M, R, x0 + 23, y0 + 1, 16, 15);
+    M.addProp('carro', x0 + 23, y0 + 2, { v: 3 }); M.addProp('carro', x0 + 26, y0 + 2, { v: 3, rot: 2 });
+    M.addProp('van', x0 + 35, y0 + 8, { v: 1 });
+    for (let i = x0 + 1; i < x0 + 39; i += 4) if (R() < 0.5) M.addProp(pickR2(R, ['banco', 'planta', 'lixeira', 'arbusto']), i, y0 + 17, { v: 1 });
+  }
+  function industrial(M, R, x0, y0) {
+    building(M, R, 'armazem', x0 + 1, y0 + 1, 26, 18, 'S');
+    building(M, R, 'oficina', x0 + 28, y0 + 24, 11, 14, 'S');
+    // pátio cercado com contêineres
+    for (let j = y0 + 22; j < y0 + 40; j++) for (let i = x0; i < x0 + 26; i++) M.floor[j * N + i] = F.CASCALHO;
+    for (let i = x0; i < x0 + 26; i++) { fenceN(M, i, y0 + 22, S.cerca_arame); }
+    for (let j = y0 + 22; j < y0 + 40; j++) { fenceW(M, x0, j, S.cerca_arame); fenceW(M, x0 + 26, j, S.cerca_arame); }
+    gate(M, 'W', x0 + 26, y0 + 30); gate(M, 'W', x0 + 26, y0 + 31);
+    M.addProp('conteiner', x0 + 2, y0 + 24, { v: 0 }); M.addProp('conteiner', x0 + 6, y0 + 24, { v: 1 });
+    M.addProp('conteiner', x0 + 14, y0 + 30, { v: 2, rot: 1 });
+    for (let t = 0; t < 14; t++) M.addProp(pickR2(R, ['barril', 'barril', 'palete', 'pneus', 'caixa', 'caixa_papelao']), x0 + 10 + Math.floor(R() * 14), y0 + 23 + Math.floor(R() * 6), { v: Math.floor(R() * 5) });
+    M.addProp('van', x0 + 30, y0 + 15, { v: 2 });
+  }
+  function park(M, R, x0, y0) {
+    for (let j = y0; j < y0 + BLOCK; j++) for (let i = x0; i < x0 + BLOCK; i++) M.floor[j * N + i] = F.PARQUE;
+    for (let a = 0; a < BLOCK; a++) for (const w of [0, 1]) { M.floor[(y0 + 19 + w) * N + x0 + a] = F.CALCADA; M.floor[(y0 + a) * N + x0 + 19 + w] = F.CALCADA; }
+    for (let a = 0; a < BLOCK; a++) { const d = Math.floor(a * 0.9); if (d < BLOCK) M.floor[(y0 + a) * N + x0 + d] = F.TERRA; }
+    for (let t = 0; t < 70; t++) {
+      const i = x0 + 1 + Math.floor(R() * 38), j = y0 + 1 + Math.floor(R() * 38);
+      if (M.floor[j * N + i] !== F.PARQUE) continue;
+      M.addProp(R() < 0.65 ? 'arvore' : 'arbusto', i, j, { v: Math.floor(R() * 3) });
+    }
+    for (let a = 3; a < BLOCK - 3; a += 6) { M.addProp('banco', x0 + a, y0 + 17, {}); M.addProp('poste', x0 + a + 3, y0 + 18, {}); M.addProp('banco', x0 + 21, y0 + a, { rot: 1 }); }
+    M.addProp('lixeira', x0 + 18, y0 + 21, {}); M.addProp('lixeira', x0 + 21, y0 + 18, {});
+  }
+  function military(M, R, x0, y0) {
+    building(M, R, 'apartamentos', x0 + 18, y0 + 18, 21, 21, 'S');
+    building(M, R, 'posto', x0 + 2, y0 + 2, 8, 6, 'S');
+    for (let j = y0; j < y0 + 16; j++) for (let i = x0; i < x0 + 40; i++) if (M.bld[j * N + i] < 0) M.floor[j * N + i] = F.MILITAR;
+    for (let i = x0; i < x0 + 40; i += 2) if (i < x0 + 17 || i > x0 + 21) M.addProp('sacos_areia', i, y0 + 15, {});
+    M.addProp('tenda', x0 + 13, y0 + 2, {}); M.addProp('tenda', x0 + 18, y0 + 2, {}); M.addProp('tenda', x0 + 23, y0 + 2, {});
+    for (let t = 0; t < 12; t++) M.addProp(pickR2(R, ['caixa_militar', 'caixa_militar', 'barril', 'sacos_areia']), x0 + 2 + Math.floor(R() * 36), y0 + 8 + Math.floor(R() * 6), { v: 3 });
+    M.addProp('van', x0 + 30, y0 + 6, { v: 3, rot: 1 });
+    for (let t = 0; t < 10; t++) M.addProp(pickR2(R, ['arvore', 'arbusto', 'lixeira', 'banco']), x0 + 1 + Math.floor(R() * 15), y0 + 18 + Math.floor(R() * 20), { v: Math.floor(R() * 3) });
+  }
+  function labCompound(M, R, x0, y0) {
+    const B = building(M, R, 'lab', x0 + 3, y0 + 2, 34, 16, 'N');
+    // cerca do complexo
+    for (let i = x0; i < x0 + 40; i++) { fenceN(M, i, y0 + 40, S.cerca_arame); }
+    for (let j = y0 + 18; j < y0 + 40; j++) { fenceW(M, x0, j, S.cerca_arame); fenceW(M, x0 + 40, j, S.cerca_arame); }
+    gate(M, 'N', x0 + 19, y0 + 40); gate(M, 'N', x0 + 20, y0 + 40);
+    // pátio da cratera
+    const cx = x0 + 20, cy = y0 + 29;
+    for (let j = y0 + 19; j < y0 + 40; j++) for (let i = x0 + 1; i < x0 + 40; i++) {
+      const d = Math.hypot(i + 0.5 - cx, (j + 0.5 - cy) * 1.1);
+      M.floor[j * N + i] = d < 5 ? F.CRATERA : d < 9 + N3(i * 0.3, j * 0.3, 1) * 3 ? F.MICELIO : d < 12 ? F.TERRA : F.CONCRETO;
+    }
+    M.fragment = M.addProp('fragmento', cx - 2, cy - 2, {});
+    for (const [i, j] of [[x0 + 3, y0 + 21], [x0 + 32, y0 + 21], [x0 + 3, y0 + 33]]) M.addProp('tenda', i, j, {});
+    for (let t = 0; t < 10; t++) { const a = t * 0.63, r = 7 + (t % 3); M.addProp(t % 2 ? 'barreira' : 'caixa_militar', Math.floor(cx + Math.cos(a) * r), Math.floor(cy + Math.sin(a) * r * 0.9), { v: 1 }); }
+    for (let t = 0; t < 6; t++) M.addProp('pilar_fungico', Math.floor(cx + (R() - 0.5) * 12), Math.floor(cy + (R() - 0.5) * 10), { v: t });
+    M.addProp('van', x0 + 30, y0 + 30, { v: 0 });
+    M.addProp('van', x0 + 34, y0 + 30, { v: 1 });
+    // ponto de partida: maior sala de laboratório
+    const r = B.rooms.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0];
+    let sp = [r.x + r.w / 2, r.y + r.h / 2];
+    for (let t = 0; t < 40; t++) { const i = r.x + 1 + Math.floor(R() * (r.w - 2)), j = r.y + 1 + Math.floor(R() * (r.h - 2)); if (!M.prop(i, j)) { sp = [i + 0.5, j + 0.5]; break; } }
+    M.spawn = sp;
+  }
+  function streets(M, R) {
+    for (const c of CORS) {
+      for (let a = CORS[0]; a < CORS[NB] + COR; a++) {
+        const inter = CORS.some((q) => a >= q - 4 && a < q + COR + 4);
+        // postes, árvores e mobiliário nas calçadas (fileira junto ao meio-fio)
+        for (const [o, rot] of [[2, 1], [11, 3]]) {
+          if (inter) continue;
+          const vx = c + o, hy = c + o;
+          const pickS = () => { const r = R(); return r < 0.1 ? 'lixeira' : r < 0.14 ? 'hidrante' : r < 0.18 ? 'placa' : r < 0.24 ? 'banco' : r < 0.3 ? 'sacos_lixo' : null; };
+          if (a % 12 === 0) { M.addProp('poste', vx, a, { rot }); M.addProp('poste', a, hy, { rot: rot === 1 ? 0 : 2 }); }
+          else if (a % 8 === 4) { if (R() < 0.7) M.addProp('arvore', vx, a, { v: Math.floor(R() * 3) }); if (R() < 0.7) M.addProp('arvore', a, hy, { v: Math.floor(R() * 3) }); }
+          else { let t = pickS(); if (t && t !== 'banco') M.addProp(t, vx, a, { v: Math.floor(R() * 3) }); t = pickS(); if (t && t !== 'banco') M.addProp(t, a, hy, { v: Math.floor(R() * 3) }); }
+        }
+        // carros estacionados junto ao meio-fio
+        if (!inter && a % 7 === 0 && R() < 0.42) M.addProp(R() < 0.88 ? 'carro' : 'van', c + 3, a, { v: Math.floor(R() * 8), rot: 0 });
+        if (!inter && a % 7 === 3 && R() < 0.42) M.addProp(R() < 0.88 ? 'carro' : 'van', c + 9, a, { v: Math.floor(R() * 8), rot: 2 });
+        if (!inter && a % 7 === 1 && R() < 0.42) M.addProp(R() < 0.88 ? 'carro' : 'van', a, c + 3, { v: Math.floor(R() * 8), rot: 1 });
+        if (!inter && a % 7 === 5 && R() < 0.42) M.addProp(R() < 0.88 ? 'carro' : 'van', a, c + 9, { v: Math.floor(R() * 8), rot: 3 });
+        // carros abandonados no meio da pista
+        if (!inter && R() < 0.012) M.addProp('carro', c + 5, a, { v: R() < 0.4 ? 5 : Math.floor(R() * 8), rot: R() < 0.5 ? 0 : 2 });
+        if (!inter && R() < 0.012) M.addProp('carro', a, c + 5, { v: R() < 0.4 ? 5 : Math.floor(R() * 8), rot: R() < 0.5 ? 1 : 3 });
+        // detritos
+        if (R() < 0.05) M.decals.push({ k: pickR2(R, ['papel', 'papel', 'garrafa', 'lata', 'mancha', 'bueiro', 'folhas']), x: c + 3 + Math.floor(R() * 8), y: a, v: Math.floor(R() * 4) });
+        if (R() < 0.05) M.decals.push({ k: pickR2(R, ['papel', 'garrafa', 'lata', 'mancha', 'folhas']), x: a, y: c + 3 + Math.floor(R() * 8), v: Math.floor(R() * 4) });
+      }
+    }
+    // bloqueios policiais em cruzamentos
+    for (const [cx, cy] of [[CORS[1], CORS[1]], [CORS[2], CORS[2]], [CORS[1], CORS[2]]]) {
+      for (let a = 4; a <= 9; a += 2) M.addProp('barreira', cx + a, cy - 1, { v: 0 });
+      M.addProp('carro', cx + 2, cy - 7, { v: 3 });
+      M.addProp('cone', cx + 11, cy - 1, {}); M.addProp('cone', cx + 3, cy - 1, {});
+    }
+  }
+  function outskirts(M, R) {
+    const inCity = (i, j) => i >= CORS[0] - 1 && j >= CORS[0] - 1 && i <= CORS[NB] + COR && j <= CORS[NB] + COR;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      if (inCity(i, j) || M.propAt[j * N + i] >= 0) continue;
+      const edge = Math.min(i, j, N - 1 - i, N - 1 - j);
+      const dens = edge < 4 ? 0.75 : 0.16 + N3(i * 0.06, j * 0.06, 4) * 0.2;
+      const r = R();
+      if (M.floor[j * N + i] === F.TERRA) continue;
+      if (r < dens) M.addProp('arvore', i, j, { v: R() < 0.3 ? 1 : R() < 0.15 ? 3 : Math.floor(R() * 3) });
+      else if (r < dens + 0.05) M.addProp('arbusto', i, j, { v: Math.floor(R() * 3) });
+      else if (r < dens + 0.052) M.addProp(pickR2(R, ['pneus', 'barril', 'caixa', 'carro']), i, j, { v: 5, rot: Math.floor(R() * 4) });
+    }
+  }
+  function nestsAndFungus(M, R) {
+    const spots = [];
+    // periferia
+    for (let t = 0; t < 5; t++) spots.push([R() < 0.5 ? 4 + Math.floor(R() * 8) : N - 12 + Math.floor(R() * 8), 10 + Math.floor(R() * (N - 20))]);
+    for (let t = 0; t < 4; t++) spots.push([10 + Math.floor(R() * (N - 20)), R() < 0.5 ? 5 + Math.floor(R() * 7) : N - 12 + Math.floor(R() * 7)]);
+    // dentro de prédios
+    const bl = M.buildings.filter((b) => b.type !== 'lab');
+    for (let t = 0; t < 9 && bl.length; t++) { const b = bl.splice(Math.floor(R() * bl.length), 1)[0]; const r = b.rooms.slice().sort((a, c) => c.w * c.h - a.w * a.h)[0]; spots.push([r.x + Math.floor(r.w / 2) - 1, r.y + Math.floor(r.h / 2) - 1, b.id]); }
+    for (const [x, y] of spots) {
+      for (let a = -1; a <= 2; a++) for (let b = -1; b <= 2; b++) { const p = M.prop(x + a, y + b); if (p && !p.nest && p.type !== 'fragmento') M.removeProp(p); }
+      const p = M.addProp('ninho', x, y, { v: Math.floor(R() * 4) });
+      if (!p) continue;
+      const rad = 4 + R() * 3;
+      for (let b = -8; b <= 8; b++) for (let a = -8; a <= 8; a++) {
+        const i = x + 1 + a, j = y + 1 + b;
+        if (!M.inb(i, j)) continue;
+        const d = Math.hypot(a, b) + N3(i * 0.4, j * 0.4, 5) * 2.5;
+        if (d < rad) M.floor[j * N + i] = F.MICELIO;
+        else if (d < rad + 2 && R() < 0.06 && !M.prop(i, j)) M.addProp(R() < 0.6 ? 'cogumelos' : R() < 0.6 ? 'casulo' : 'pilar_fungico', i, j, { v: Math.floor(R() * 4), bld: M.bld[j * N + i] });
+        else if (d < rad && R() < 0.05 && !M.prop(i, j)) M.addProp('cogumelos', i, j, { v: Math.floor(R() * 4) });
+      }
+    }
+    // manchas espalhadas
+    for (let t = 0; t < 110; t++) {
+      const i = 4 + Math.floor(R() * (N - 8)), j = 4 + Math.floor(R() * (N - 8));
+      const r = 1 + R() * 2.2;
+      for (let b = -3; b <= 3; b++) for (let a = -3; a <= 3; a++) if (Math.hypot(a, b) < r && M.inb(i + a, j + b) && M.floor[(j + b) * N + i + a] !== F.CRATERA) M.floor[(j + b) * N + i + a] = F.MICELIO;
+      if (R() < 0.6 && !M.prop(i, j)) M.addProp('cogumelos', i, j, { v: Math.floor(R() * 4) });
+      if (R() < 0.25 && !M.prop(i + 1, j)) M.addProp('casulo', i + 1, j, {});
+    }
+  }
+  // define o estilo visível de cada parede (interior do cômodo ou fachada)
+  function finalizeWalls(M) {
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const k = j * N + i;
+      for (const s of ['N', 'W']) {
+        const kind = M['w' + s][k];
+        if (!kind) continue;
+        const b = M['wb' + s][k];
+        if (b < 0) continue;
+        const r = M.room[k];
+        if (r >= 0 && M.bld[k] === b) M['ws' + s][k] = M.rooms[r].style;
+        else if (M.bld[k] >= 0 && r >= 0) M['ws' + s][k] = M.rooms[r].style;
+        else M['ws' + s][k] = M.buildings[b].ext;
+      }
+    }
+  }
+
+  return { TW, TH, VPT, WALL_H, SC, N, F, W, S, STYLES, DOORS, iso, unIso, rng, Map: CityMap, floorSprite, wallSprite, WF, setWallBudget: (ms) => (wallBudget = ms), CORS, COR };
 })();

@@ -1,0 +1,45 @@
+'use strict';
+// Textos do mundo: diários de pesquisa, terminais, tomos e entradas do bestiário.
+const LORE = {
+  diarios: [
+    { t: 'Diário 1 — Instituto Hélio', b: 'Dia 1 após a queda. O objeto caiu às 03h12 a quinhentos metros do instituto. Não é rocha. A superfície absorve a luz do laser e devolve em outro comprimento de onda. A equipe o chama de Fragmento.' },
+    { t: 'Diário 2', b: 'Encontramos filamentos crescendo nas fissuras do Fragmento. Estrutura fúngica, mas com DNA que não lê em nenhuma base conhecida. Designação provisória: Micélio-Ω. Cresce mais rápido no escuro.' },
+    { t: 'Diário 3', b: 'O técnico Rafael inalou esporos durante a coleta. Febre, depois calma absoluta. No terceiro dia, algo começou a brotar na nuca dele. Ele dizia ouvir um coro “do outro lado do céu”.' },
+    { t: 'Diário 4', b: 'Os hospedeiros não morrem. O micélio reorganiza o sistema nervoso e usa o corpo como suporte de frutificação. Eles caçam para espalhar esporos. A contaminação é reversível no começo: antifúngicos de amplo espectro retardam a colonização.' },
+    { t: 'Diário 5', b: 'Os ninhos funcionam como nós de uma rede. Cada ninho sustenta a floração local e alimenta o Fragmento com algo que ainda não sabemos medir. Quando um ninho morre, o Fragmento escurece por alguns segundos.' },
+    { t: 'Diário 6', b: 'Ontem à noite vimos coisas saindo do clarão do Fragmento. Não são hospedeiros. São de outro lugar. Um deles flutua e olha. Quem olha de volta por muito tempo perde o juízo.' },
+    { t: 'Diário 7', b: 'A Floração acontece em ciclos. O céu fica violeta, os esporos sobem do chão e todos os hospedeiros convergem. Abriguem-se. Máscaras com filtro ativado ajudam. O fogo é a única coisa que o micélio teme.' },
+    { t: 'Diário 8 — Dra. Helena Rocha', b: 'Fui exposta. Meu visor segurou a maior parte, mas não toda. Se alguém ler isto: destrua os ninhos. Com a rede enfraquecida, o Fragmento fica vulnerável. Termine o que começamos.' },
+  ],
+  terminais: [
+    'SEGURANÇA // Turno da noite: setor C isolado. Não abrir o tanque 3 em hipótese alguma.',
+    'E-MAIL // Assunto: evacuação. Ônibus às 06h na praça. Quem não estiver lá fica para trás.',
+    'LOG DE PESQUISA // Amostra 14 respondeu a frequências abaixo de 20 Hz. Ela canta.',
+    'MANUTENÇÃO // Gerador do bloco B com 40% de carga. Priorizar a contenção.',
+    'DEFESA CIVIL // Barreiras montadas nos cruzamentos. Disparar apenas em hospedeiros confirmados.',
+    'HOSPITAL // Pacientes com brotos na pele: isolar, sedar e queimar os lençóis.',
+    'LAB // Fogo destrói o micélio em segundos. Lança-chamas no depósito do galpão.',
+    'PESSOAL // Se você está lendo isto, eu não consegui sair. Diga à minha filha que tentei.',
+  ],
+  tomos: [
+    'Antes dos astros existe o Jardim, e o Jardim sonha com mundos férteis. Quando sonha conosco, acordamos florescendo.',
+    'O Arauto não fala. Ele aponta. Para onde aponta, o chão se abre em esporos.',
+    'Os olhos que flutuam não enxergam luz. Enxergam a mente. Feche a sua e eles se perdem.',
+    'O Fragmento é uma semente. Os ninhos, suas raízes. Corte as raízes e a semente adoece.',
+  ],
+  bestiario: {
+    inf_civil: { n: 'Hospedeiro', d: 'Pessoa colonizada pelo Micélio-Ω. Lenta, mas nunca para. Cada golpe espalha esporos.', a: 'Ameaça baixa · em grupos é letal' },
+    inf_civil2: { n: 'Hospedeira', d: 'Os cogumelos crescem primeiro no couro cabeludo. A luz azulada denuncia sua posição no escuro.', a: 'Ameaça baixa' },
+    inf_policial: { n: 'Policial Infectado', d: 'O colete ainda funciona. Mais resistente que um hospedeiro comum.', a: 'Ameaça média · 15% de blindagem' },
+    inf_cientista: { n: 'Cientista Infectado', d: 'A máscara não salvou. O fungo atravessou o filtro. Libera esporos ao morrer.', a: 'Ameaça média · nuvem de esporos' },
+    inf_corredor: { n: 'Espreitador', d: 'Corpo magro, placas fúngicas nas costas. Corre mais rápido que você.', a: 'Ameaça alta · muito rápido' },
+    inf_inchado: { n: 'Inchado', d: 'Sacos de esporos prestes a romper. Explode quando chega perto. Ataque de longe.', a: 'Ameaça alta · explosão de esporos' },
+    inf_gritador: { n: 'Gritador', d: 'Um leque fúngico cresce ao redor da cabeça. Seu grito chama todos os hospedeiros da área.', a: 'Ameaça alta · invoca horda' },
+    inf_brutamonte: { n: 'Brutamonte', d: 'Massa muscular hipertrofiada pelo micélio. Investe em linha reta e arremessa o que acerta.', a: 'Ameaça extrema · investida' },
+    al_arauto: { n: 'Arauto', d: 'Alto demais, crânio alongado, quatro olhos. Cospe projéteis de esporos e corrói a sanidade de quem o observa.', a: 'Alienígena · ataque à distância · sanidade' },
+    al_rastejador: { n: 'Rastejador', d: 'Hexápode de carapaça iridescente. Caça em matilhas e salta sobre a presa.', a: 'Alienígena · matilha · salto' },
+    al_vigia: { n: 'Vigia', d: 'Uma massa de olhos que flutua. Seu olhar é um feixe que fere a mente.', a: 'Alienígena · feixe psíquico · sanidade' },
+    ninho: { n: 'Ninho de Micélio', d: 'Nó vivo da rede fúngica. Gera hospedeiros sem parar. Fogo e explosivos são eficazes.', a: 'Objetivo · destrua todos' },
+    fragmento: { n: 'O Fragmento', d: 'O objeto que caiu do céu. Enquanto os ninhos viverem, nada o fere.', a: 'Objetivo final' },
+  },
+};

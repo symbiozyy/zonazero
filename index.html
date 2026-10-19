@@ -18,6 +18,8 @@
   --leaf: #86c25a;
   --water: #5aa8d8;
   --amber: #e2ac44;
+  --spore: #c062d0;
+  --mind: #6af0e0;
   --ink: #0b0d0a;
   --display: 'Silkscreen', 'Courier New', monospace;
   --body: 'VT323', 'Courier New', monospace;
@@ -29,7 +31,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--bo
 button { font: inherit; color: inherit; }
 kbd { font-family: var(--display); font-size: 11px; padding: 1px 5px; border: 1px solid var(--brass); background: var(--plate-2); color: var(--amber); }
 .muted { color: var(--muted); }
-.bad { color: var(--blood); } .warn { color: var(--amber); }
+.bad { color: var(--blood); } .warn { color: var(--amber); } .lore { color: var(--spore); } .good { color: var(--leaf); }
 
 .panel { background: var(--plate); border: 2px solid var(--ink); box-shadow: inset 0 0 0 2px var(--brass-dim), inset 0 0 0 4px var(--plate-2), 0 6px 0 rgba(0,0,0,.4); position: relative; }
 .panel::before, .panel::after { content: ''; position: absolute; width: 4px; height: 4px; background: var(--brass); top: 7px; left: 7px; box-shadow: 0 0 0 1px var(--ink); }
@@ -49,20 +51,27 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; letter-sp
 .bar i::after { content: ''; position: absolute; inset: 1px; right: auto; width: calc(var(--v, 100%) - 2px); background: var(--c); }
 .bar.low i::after { animation: blink .6s steps(2) infinite; }
 @keyframes blink { 50% { opacity: .35; } }
-#b-hp { --c: var(--blood); } #b-food { --c: var(--amber); } #b-water { --c: var(--water); } #b-stam { --c: var(--leaf); }
+#b-hp { --c: var(--blood); } #b-food { --c: var(--amber); } #b-water { --c: var(--water); } #b-stam { --c: var(--leaf); } #b-cont { --c: var(--spore); } #b-san { --c: var(--mind); }
 #status { font-size: 16px; min-height: 16px; color: var(--muted); }
 #topright { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: max(10px, env(safe-area-inset-right, 0px)); padding: 12px; display: grid; gap: 4px; justify-items: end; text-align: right; }
 #clock { font-family: var(--display); font-size: 13px; color: var(--amber); }
-#kills, #horde { font-size: 17px; }
+#kills, #horde, #nests { font-size: 17px; }
+#nests { color: var(--spore); }
+#ammo { font-family: var(--display); font-size: 16px; padding: 4px 10px; background: rgba(11,13,10,.82); border: 1px solid var(--brass-dim); }
+#ammo small { font-family: var(--body); font-size: 16px; color: var(--muted); }
+#ammo.empty b { color: var(--blood); }
+.slot .mag { position: absolute; left: 2px; bottom: 0; font-size: 12px; color: var(--amber); text-shadow: 1px 1px 0 #000; }
+#codex-btn { pointer-events: auto; }
+.tr-btns { display: flex; gap: 4px; }
 #horde { color: var(--blood); }
-#mini { width: 160px; height: 80px; image-rendering: pixelated; background: var(--ink); border: 1px solid var(--brass-dim); }
+#mini { width: 180px; height: 100px; image-rendering: pixelated; background: var(--ink); border: 1px solid var(--brass-dim); }
 #menu-btn { pointer-events: auto; margin-top: 2px; }
 #bottom { position: absolute; left: 0; right: 0; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); display: grid; justify-items: center; gap: 8px; }
 #prompt { background: rgba(11,13,10,.82); border: 1px solid var(--brass-dim); padding: 3px 10px; font-size: 19px; }
 #hotbar { display: flex; gap: 4px; padding: 8px; pointer-events: auto; }
 #log { position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); bottom: calc(96px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 3px; max-width: min(420px, 70vw); }
 .toast { background: rgba(11,13,10,.8); padding: 2px 8px; border-left: 3px solid var(--brass); font-size: 18px; transition: opacity .8s; }
-.toast.bad { border-color: var(--blood); } .toast.warn { border-color: var(--amber); }
+.toast.bad { border-color: var(--blood); } .toast.warn { border-color: var(--amber); } .toast.lore { border-color: var(--spore); } .toast.good { border-color: var(--leaf); }
 .toast.out { opacity: 0; }
 #banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-family: var(--display); font-size: clamp(22px, 5vw, 46px); color: var(--blood); text-shadow: 3px 3px 0 #000; opacity: 0; }
 #banner.show { animation: banner 4s ease-out; }
@@ -87,8 +96,10 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; letter-sp
 .inv-cols { display: grid; grid-template-columns: 180px minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .col { display: grid; gap: 8px; min-width: 0; }
 .col h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; }
-#inv-preview { width: 168px; height: 204px; image-rendering: pixelated; background: radial-gradient(circle at 50% 70%, #3a4430, var(--plate-2) 70%); border: 2px solid var(--ink); }
-.equip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; font-size: 15px; color: var(--muted); }
+#inv-preview { width: 180px; height: 180px; image-rendering: pixelated; background: radial-gradient(circle at 50% 70%, #3a4430, var(--plate-2) 70%); border: 2px solid var(--ink); }
+.equip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; text-align: center; font-size: 14px; color: var(--muted); }
+.equip .slot { width: 40px; height: 40px; } .equip .slot img { width: 34px; height: 34px; }
+#filter-info { font-size: 15px; color: var(--mind); min-height: 15px; }
 .equip > div { display: grid; justify-items: center; gap: 2px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, 46px); gap: 4px; }
 #bag-weight.over { color: var(--blood); }
@@ -110,9 +121,10 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; letter-sp
 /* telas */
 .screen { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px)); overflow: auto; background: radial-gradient(ellipse at 50% 30%, #1d2418, var(--bg) 70%); }
 .screen.dim { background: rgba(5,6,4,.72); }
+#title, #end { z-index: 20; } #pause { z-index: 25; } #viewer, #codex, #text, #bigmap { z-index: 30; } #loading { z-index: 40; } #inv { z-index: 15; }
 .card { padding: 28px; width: min(760px, 100%); display: grid; gap: 18px; }
-.title-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 22px; align-items: center; }
-#title-preview { width: 168px; height: 204px; image-rendering: pixelated; background: radial-gradient(circle at 50% 72%, #3a4430, transparent 70%); }
+.title-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 22px; align-items: center; }
+#title-preview { width: 200px; height: 200px; image-rendering: pixelated; background: radial-gradient(circle at 50% 72%, #3a4430, transparent 70%); }
 .logo { font-size: clamp(34px, 8vw, 64px); color: var(--fg); line-height: .95; text-shadow: 4px 4px 0 #000, 0 0 0 var(--blood); }
 .logo span { color: var(--blood); }
 .tag { margin: 6px 0 0; font-size: 21px; color: var(--muted); max-width: 46ch; }
@@ -136,12 +148,31 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; letter-sp
 .vcell figcaption { font-family: var(--display); font-size: 11px; color: var(--muted); padding-bottom: 4px; }
 #v-info { color: var(--muted); font-size: 17px; }
 
+/* códex */
+#codex .card, #text .card, #bigmap .card { width: min(1040px, 100%); max-height: 100%; overflow: auto; }
+#codex-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.hcard { margin: 0; background: #050505; border: 1px solid #2a2a2a; display: grid; gap: 6px; padding: 8px; }
+.hcard img { width: 100%; image-rendering: pixelated; display: block; }
+.hcard .unk { aspect-ratio: 132 / 168; display: grid; place-items: center; font-family: var(--display); font-size: 40px; color: #333; border: 2px dashed #222; }
+.hcard figcaption { display: grid; gap: 2px; font-size: 16px; line-height: 1.1; }
+.hcard figcaption b { font-family: var(--display); font-size: 11px; letter-spacing: .06em; color: var(--fg); }
+.hcard figcaption small { color: var(--spore); font-size: 14px; }
+.hcard figcaption span { color: var(--muted); }
+.hcard.unknown figcaption b { color: #555; }
+#codex-lore { display: grid; gap: 6px; font-size: 18px; }
+#codex-lore h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; margin-top: 6px; }
+#codex-lore ul { margin: 0; padding-left: 18px; }
+#text-body { white-space: pre-wrap; font-size: 21px; line-height: 1.25; max-width: 62ch; margin: 0; }
+#bigmap-cv { width: 100%; max-width: 100%; aspect-ratio: 2 / 1; image-rendering: pixelated; background: #0b0d0a; border: 1px solid var(--brass-dim); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 16px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: middle; }
+
 /* toque */
 #touch { position: fixed; inset: 0; pointer-events: none; }
 #stick { position: absolute; left: max(20px, env(safe-area-inset-left, 0px)); bottom: calc(110px + env(safe-area-inset-bottom, 0px)); width: 120px; height: 120px; border-radius: 50%; background: rgba(11,13,10,.45); border: 2px solid var(--brass-dim); pointer-events: auto; touch-action: none; }
 #knob { position: absolute; left: 36px; top: 36px; width: 44px; height: 44px; border-radius: 50%; background: var(--plate-3); border: 2px solid var(--brass); }
-#tbtns { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(100px + env(safe-area-inset-bottom, 0px)); display: grid; grid-template-columns: repeat(3, 58px); gap: 8px; pointer-events: auto; }
-#tbtns button { height: 58px; border-radius: 50%; background: rgba(42,49,35,.85); border: 2px solid var(--brass-dim); font-family: var(--display); font-size: 10px; touch-action: none; }
+#tbtns { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(100px + env(safe-area-inset-bottom, 0px)); display: grid; grid-template-columns: repeat(4, 54px); gap: 7px; pointer-events: auto; }
+#tbtns button { height: 54px; border-radius: 50%; background: rgba(42,49,35,.85); border: 2px solid var(--brass-dim); font-family: var(--display); font-size: 10px; touch-action: none; }
 #tbtns button.on { border-color: var(--amber); color: var(--amber); }
 #t-atk { background: rgba(110,30,26,.85) !important; }
 
@@ -168,19 +199,23 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; letter-sp
     <div class="bar" id="b-food"><span>Fome</span><i></i></div>
     <div class="bar" id="b-water"><span>Sede</span><i></i></div>
     <div class="bar" id="b-stam"><span>Fôlego</span><i></i></div>
+    <div class="bar" id="b-cont"><span>Esporos</span><i></i></div>
+    <div class="bar" id="b-san"><span>Sanidade</span><i></i></div>
     <div id="status"></div>
   </div>
   <div id="topright" class="panel">
     <div id="clock">Dia 1 · 08:00</div>
-    <canvas id="mini" width="160" height="80"></canvas>
+    <canvas id="mini" width="180" height="100"></canvas>
     <div id="kills">0 abatidos</div>
+    <div id="nests">Ninhos 0/0</div>
     <div id="horde"></div>
-    <button id="menu-btn" class="btn small" type="button">Menu</button>
+    <div class="tr-btns"><button id="codex-btn" class="btn small" type="button">Códex</button><button id="menu-btn" class="btn small" type="button">Menu</button></div>
   </div>
   <div id="log"></div>
   <div id="banner"></div>
   <div id="bottom">
     <div id="prompt" hidden></div>
+    <div id="ammo" hidden></div>
     <div id="hotbar" class="panel"></div>
   </div>
 </div>
@@ -188,9 +223,11 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; letter-sp
 <div id="touch" hidden>
   <div id="stick"><div id="knob"></div></div>
   <div id="tbtns">
+    <button id="t-map" type="button">Mapa</button>
     <button id="t-light" type="button">Luz</button>
     <button id="t-crouch" type="button">Agachar</button>
     <button id="t-bag" type="button">Bolsa</button>
+    <button id="t-reload" type="button">Recarr.</button>
     <button id="t-run" type="button">Correr</button>
     <button id="t-use" type="button">Usar</button>
     <button id="t-atk" type="button">Atacar</button>
@@ -206,12 +243,9 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; letter-sp
     </div>
     <div class="inv-cols">
       <div class="col">
-        <canvas id="inv-preview" width="168" height="204"></canvas>
-        <div class="equip">
-          <div>Cabeça<span id="eq-head"></span></div>
-          <div>Corpo<span id="eq-body"></span></div>
-          <div>Costas<span id="eq-back"></span></div>
-        </div>
+        <canvas id="inv-preview" width="180" height="180"></canvas>
+        <div class="equip" id="equip"></div>
+        <div id="filter-info"></div>
       </div>
       <div class="col">
         <h3>Bolsos · 1–6 = barra rápida</h3>
@@ -245,54 +279,81 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; letter-sp
   </div>
 </div>
 
+<div id="codex" class="screen dim" hidden>
+  <div class="card panel">
+    <div class="inv-head"><h2>Códex · Bestiário</h2><button id="codex-close" class="btn small" type="button">Fechar</button></div>
+    <div id="codex-grid"></div>
+    <div id="codex-lore"></div>
+  </div>
+</div>
+
+<div id="text" class="screen dim" hidden>
+  <div class="card panel">
+    <div class="inv-head"><h2 id="text-title">Diário</h2><button id="text-close" class="btn small" type="button">Fechar</button></div>
+    <p id="text-body"></p>
+  </div>
+</div>
+
+<div id="bigmap" class="screen dim" hidden>
+  <div class="card panel">
+    <div class="inv-head"><h2>Mapa da cidade</h2><button id="bigmap-close" class="btn small" type="button">Fechar (M)</button></div>
+    <canvas id="bigmap-cv" width="816" height="408"></canvas>
+    <div class="legend"><span><i style="background:#fff"></i>Você</span><span><i style="background:#d06aff"></i>Ninho</span><span><i style="background:#6af7ff"></i>O Fragmento</span><span><i style="background:#ff4a3a"></i>Criaturas à vista</span><span><i style="background:#b8ae98"></i>Prédios</span></div>
+  </div>
+</div>
+
 <div id="pause" class="screen dim" hidden>
   <div class="card panel">
     <h2>Pausado</h2>
     <div class="controls" id="pause-controls"></div>
-    <div class="actions"><button id="btn-resume" class="btn primary" type="button">Continuar</button><button id="btn-pause-sprites" class="btn" type="button">Ver sprites</button></div>
+    <div class="actions"><button id="btn-resume" class="btn primary" type="button">Continuar</button><button id="btn-save" class="btn" type="button">Salvar</button><button id="btn-pause-codex" class="btn" type="button">Códex</button><button id="btn-pause-sprites" class="btn" type="button">Ver sprites</button></div>
   </div>
 </div>
 
-<div id="death" class="screen dim" hidden>
+<div id="end" class="screen dim" hidden>
   <div class="card panel">
-    <h1 class="logo">VOCÊ <span>MORREU</span></h1>
-    <p id="death-stats" class="tag"></p>
-    <div class="actions"><button id="btn-retry" class="btn primary" type="button">Tentar de novo</button></div>
+    <h1 class="logo" id="end-title">VOCÊ <span>MORREU</span></h1>
+    <p id="end-stats" class="tag"></p>
+    <div class="actions"><button id="btn-retry" class="btn primary" type="button">Voltar ao início</button></div>
   </div>
 </div>
 
 <div id="title" class="screen" hidden>
   <div class="card panel">
     <div class="title-row">
-      <canvas id="title-preview" width="168" height="204"></canvas>
+      <canvas id="title-preview" width="200" height="200"></canvas>
       <div>
         <h1 class="logo">ZONA <span>ZERO</span></h1>
-        <p class="tag">Sobrevivência isométrica. Vasculhe a cidade, junte suprimentos, erga barricadas e aguente as hordas.</p>
+        <p class="tag">Um fragmento caiu do céu e trouxe um fungo de outro mundo. A cidade floresceu. Sobreviva à contaminação, mantenha a sanidade, destrua os ninhos e acabe com o Fragmento.</p>
       </div>
     </div>
-    <div class="actions"><button id="btn-start" class="btn primary" type="button">Começar</button><button id="btn-sprites" class="btn" type="button">Ver sprites</button></div>
+    <div class="actions"><button id="btn-continue" class="btn primary" type="button" hidden>Continuar</button><button id="btn-start" class="btn primary" type="button">Novo jogo</button><button id="btn-sprites" class="btn" type="button">Ver sprites</button></div>
     <div class="controls" id="title-controls"></div>
   </div>
 </div>
 
 <div id="loading" class="screen">
   <div style="display:grid;gap:10px;justify-items:center">
-    <p>Montando sprites voxel…</p>
+    <p id="load-text">Gerando a cidade e os sprites…</p>
     <div id="load-bar"><i></i></div>
   </div>
 </div>
 
 <script src="js/voxel.js"></script>
 <script src="js/items.js"></script>
-<script src="js/characters.js"></script>
+<script src="js/creatures.js"></script>
+<script src="js/props.js"></script>
 <script src="js/world.js"></script>
+<script src="js/lore.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/render.js"></script>
 <script src="js/game.js"></script>
 <script src="js/ui.js"></script>
 <script>
 (() => {
   const ctl = GAME.isTouch
-    ? [['Analógico', 'mover'], ['Atacar', 'golpe / tiro / construir'], ['Usar', 'portas e containers'], ['Correr', 'liga e desliga'], ['Agachar', 'furtivo'], ['Bolsa', 'inventário']]
-    : [['WASD', 'mover'], ['Shift', 'correr'], ['C', 'agachar'], ['Clique / Espaço', 'atacar na direção do mouse'], ['Botão direito / R', 'construir barricada'], ['E', 'portas, containers, itens'], ['Tab / I', 'inventário'], ['1–6', 'barra rápida'], ['F', 'lanterna'], ['V', 'ver sprites'], ['Roda', 'zoom'], ['Esc', 'pausa']];
+    ? [['Analógico', 'mover'], ['Atacar', 'golpe / tiro (mira automática)'], ['Usar', 'portas e containers'], ['Recarr.', 'recarregar'], ['Correr', 'liga e desliga'], ['Agachar', 'furtivo'], ['Bolsa', 'inventário'], ['Mapa', 'mapa da cidade']]
+    : [['WASD', 'mover'], ['Shift', 'correr'], ['C', 'agachar'], ['Clique', 'atacar / atirar (segure nas automáticas)'], ['Botão direito', 'mirar / construir'], ['R', 'recarregar'], ['E', 'portas, janelas, containers'], ['Tab / I', 'inventário'], ['1–6', 'barra rápida'], ['F', 'lanterna'], ['B', 'construir'], ['J', 'códex'], ['M', 'mapa'], ['V', 'ver sprites'], ['Roda', 'zoom'], ['Esc', 'pausa']];
   const html = ctl.map(([k, v]) => `<div><kbd>${k}</kbd><span>${v}</span></div>`).join('');
   document.getElementById('title-controls').innerHTML = html;
   document.getElementById('pause-controls').innerHTML = html;
