@@ -1,0 +1,306 @@
+<title>Zona Zero</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=VT323&display=swap">
+<style>
+/* Tela cheia de jogo; painéis de chapa verde-oliva com rebites de latão (inventário de sobrevivência) */
+:root {
+  color-scheme: dark;
+  --bg: #0e100d;
+  --plate: #2a3123;
+  --plate-2: #1c2118;
+  --plate-3: #353e2b;
+  --brass: #b8955a;
+  --brass-dim: #6e5a38;
+  --fg: #e8e3cc;
+  --muted: #9ea38a;
+  --blood: #d0473a;
+  --leaf: #86c25a;
+  --water: #5aa8d8;
+  --amber: #e2ac44;
+  --ink: #0b0d0a;
+  --display: 'Silkscreen', 'Courier New', monospace;
+  --body: 'VT323', 'Courier New', monospace;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 20px; overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none; }
+#game { position: fixed; left: 0; top: 0; image-rendering: pixelated; image-rendering: crisp-edges; cursor: none; }
+button { font: inherit; color: inherit; }
+kbd { font-family: var(--display); font-size: 11px; padding: 1px 5px; border: 1px solid var(--brass); background: var(--plate-2); color: var(--amber); }
+.muted { color: var(--muted); }
+.bad { color: var(--blood); } .warn { color: var(--amber); }
+
+.panel { background: var(--plate); border: 2px solid var(--ink); box-shadow: inset 0 0 0 2px var(--brass-dim), inset 0 0 0 4px var(--plate-2), 0 6px 0 rgba(0,0,0,.4); position: relative; }
+.panel::before, .panel::after { content: ''; position: absolute; width: 4px; height: 4px; background: var(--brass); top: 7px; left: 7px; box-shadow: 0 0 0 1px var(--ink); }
+.panel::after { left: auto; right: 7px; }
+.btn { background: var(--plate-3); border: 2px solid var(--ink); box-shadow: inset 0 0 0 2px var(--brass-dim); padding: 8px 18px; font-family: var(--display); font-size: 14px; letter-spacing: .06em; cursor: pointer; text-transform: uppercase; }
+.btn:hover, .btn:focus-visible { box-shadow: inset 0 0 0 2px var(--brass); color: #fff; outline: none; }
+.btn.primary { background: #4c5a2c; color: #f4eccc; }
+.btn.small { padding: 4px 10px; font-size: 11px; }
+.btn:disabled { opacity: .4; cursor: default; }
+h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; letter-spacing: .04em; text-wrap: balance; }
+
+/* HUD */
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#stats { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: max(10px, env(safe-area-inset-left, 0px)); padding: 14px 14px 10px; width: 210px; display: grid; gap: 5px; }
+.bar { display: grid; grid-template-columns: 62px 1fr; align-items: center; gap: 8px; font-size: 17px; }
+.bar i { display: block; height: 9px; background: var(--ink); border: 1px solid #000; position: relative; }
+.bar i::after { content: ''; position: absolute; inset: 1px; right: auto; width: calc(var(--v, 100%) - 2px); background: var(--c); }
+.bar.low i::after { animation: blink .6s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+#b-hp { --c: var(--blood); } #b-food { --c: var(--amber); } #b-water { --c: var(--water); } #b-stam { --c: var(--leaf); }
+#status { font-size: 16px; min-height: 16px; color: var(--muted); }
+#topright { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: max(10px, env(safe-area-inset-right, 0px)); padding: 12px; display: grid; gap: 4px; justify-items: end; text-align: right; }
+#clock { font-family: var(--display); font-size: 13px; color: var(--amber); }
+#kills, #horde { font-size: 17px; }
+#horde { color: var(--blood); }
+#mini { width: 160px; height: 80px; image-rendering: pixelated; background: var(--ink); border: 1px solid var(--brass-dim); }
+#menu-btn { pointer-events: auto; margin-top: 2px; }
+#bottom { position: absolute; left: 0; right: 0; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); display: grid; justify-items: center; gap: 8px; }
+#prompt { background: rgba(11,13,10,.82); border: 1px solid var(--brass-dim); padding: 3px 10px; font-size: 19px; }
+#hotbar { display: flex; gap: 4px; padding: 8px; pointer-events: auto; }
+#log { position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); bottom: calc(96px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 3px; max-width: min(420px, 70vw); }
+.toast { background: rgba(11,13,10,.8); padding: 2px 8px; border-left: 3px solid var(--brass); font-size: 18px; transition: opacity .8s; }
+.toast.bad { border-color: var(--blood); } .toast.warn { border-color: var(--amber); }
+.toast.out { opacity: 0; }
+#banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-family: var(--display); font-size: clamp(22px, 5vw, 46px); color: var(--blood); text-shadow: 3px 3px 0 #000; opacity: 0; }
+#banner.show { animation: banner 4s ease-out; }
+@keyframes banner { 0%, 100% { opacity: 0; transform: scale(1.2); } 10%, 80% { opacity: 1; transform: scale(1); } }
+
+/* slots */
+.slot { width: 46px; height: 46px; background: var(--plate-2); border: 2px solid var(--ink); box-shadow: inset 0 0 0 1px #3c4632; position: relative; display: grid; place-items: center; cursor: pointer; touch-action: none; }
+.slot img { width: 40px; height: 40px; image-rendering: pixelated; pointer-events: none; }
+.slot .qty { position: absolute; right: 3px; bottom: 0; font-size: 16px; text-shadow: 1px 1px 0 #000; }
+.slot .key { position: absolute; left: 3px; top: 0; font-size: 14px; color: var(--muted); }
+.slot.hot { box-shadow: inset 0 0 0 1px var(--brass-dim); }
+.slot.active { box-shadow: inset 0 0 0 2px var(--amber); background: #33391f; }
+.slot.sel { box-shadow: inset 0 0 0 2px #fff; }
+.slot:hover { background: #262c20; }
+.ghost { position: fixed; width: 48px; height: 48px; image-rendering: pixelated; pointer-events: none; transform: translate(-50%, -50%); z-index: 99; }
+
+/* inventário */
+#inv { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(5,6,4,.55); padding: 12px max(12px, env(safe-area-inset-right, 0px)) 12px max(12px, env(safe-area-inset-left, 0px)); overflow: auto; }
+#inv .panel { padding: 20px; width: min(1000px, 100%); max-height: 100%; overflow: auto; display: grid; gap: 14px; }
+.inv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.inv-head h2 { font-size: 18px; color: var(--amber); }
+.inv-cols { display: grid; grid-template-columns: 180px minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.col { display: grid; gap: 8px; min-width: 0; }
+.col h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; }
+#inv-preview { width: 168px; height: 204px; image-rendering: pixelated; background: radial-gradient(circle at 50% 70%, #3a4430, var(--plate-2) 70%); border: 2px solid var(--ink); }
+.equip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; font-size: 15px; color: var(--muted); }
+.equip > div { display: grid; justify-items: center; gap: 2px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, 46px); gap: 4px; }
+#bag-weight.over { color: var(--blood); }
+#loot-panel { background: var(--plate-2); padding: 10px; border: 1px solid var(--brass-dim); display: grid; gap: 8px; }
+#loot-title { font-size: 13px; color: var(--fg); }
+#details { background: var(--plate-2); border: 1px solid #3c4632; padding: 10px; min-height: 70px; }
+.d-head { display: flex; gap: 10px; align-items: flex-start; }
+.d-head img { width: 48px; height: 48px; image-rendering: pixelated; flex: none; }
+.d-text { min-width: 0; } .d-text h3 { font-size: 13px; margin-bottom: 2px; color: var(--fg); text-transform: none; letter-spacing: .02em; }
+.d-text p { margin: 0; font-size: 18px; line-height: 1.1; }
+.d-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.hint { margin: 0; color: var(--muted); font-size: 17px; }
+.recipe { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px dashed #3c4632; }
+.recipe img { width: 32px; height: 32px; image-rendering: pixelated; }
+.recipe small { display: block; font-size: 16px; color: var(--muted); }
+.recipe .miss { color: var(--blood); }
+.recipe.off b { color: var(--muted); }
+
+/* telas */
+.screen { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px)); overflow: auto; background: radial-gradient(ellipse at 50% 30%, #1d2418, var(--bg) 70%); }
+.screen.dim { background: rgba(5,6,4,.72); }
+.card { padding: 28px; width: min(760px, 100%); display: grid; gap: 18px; }
+.title-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 22px; align-items: center; }
+#title-preview { width: 168px; height: 204px; image-rendering: pixelated; background: radial-gradient(circle at 50% 72%, #3a4430, transparent 70%); }
+.logo { font-size: clamp(34px, 8vw, 64px); color: var(--fg); line-height: .95; text-shadow: 4px 4px 0 #000, 0 0 0 var(--blood); }
+.logo span { color: var(--blood); }
+.tag { margin: 6px 0 0; font-size: 21px; color: var(--muted); max-width: 46ch; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 4px 18px; font-size: 18px; color: var(--muted); border-top: 1px dashed #3c4632; padding-top: 12px; }
+.controls div { display: flex; gap: 8px; align-items: baseline; }
+#load-bar { width: min(320px, 80vw); height: 12px; border: 2px solid var(--brass-dim); background: var(--ink); }
+#load-bar i { display: block; height: 100%; width: 0; background: var(--amber); }
+#loading p { font-family: var(--display); font-size: 12px; color: var(--muted); text-align: center; }
+
+/* visualizador */
+#viewer .card { width: min(980px, 100%); }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { background: var(--plate-2); border: 1px solid #3c4632; padding: 3px 10px; font-size: 17px; cursor: pointer; }
+.chip.on { border-color: var(--amber); color: var(--amber); }
+.vrow { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: start; }
+.vrow > span { font-family: var(--display); font-size: 11px; color: var(--muted); padding-top: 6px; text-transform: uppercase; }
+#v-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.vcell { margin: 0; background: var(--plate-2); border: 1px solid #3c4632; display: grid; justify-items: center; }
+.vcell canvas { width: 100%; max-width: 184px; image-rendering: pixelated; }
+.vcell figcaption { font-family: var(--display); font-size: 11px; color: var(--muted); padding-bottom: 4px; }
+#v-info { color: var(--muted); font-size: 17px; }
+
+/* toque */
+#touch { position: fixed; inset: 0; pointer-events: none; }
+#stick { position: absolute; left: max(20px, env(safe-area-inset-left, 0px)); bottom: calc(110px + env(safe-area-inset-bottom, 0px)); width: 120px; height: 120px; border-radius: 50%; background: rgba(11,13,10,.45); border: 2px solid var(--brass-dim); pointer-events: auto; touch-action: none; }
+#knob { position: absolute; left: 36px; top: 36px; width: 44px; height: 44px; border-radius: 50%; background: var(--plate-3); border: 2px solid var(--brass); }
+#tbtns { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(100px + env(safe-area-inset-bottom, 0px)); display: grid; grid-template-columns: repeat(3, 58px); gap: 8px; pointer-events: auto; }
+#tbtns button { height: 58px; border-radius: 50%; background: rgba(42,49,35,.85); border: 2px solid var(--brass-dim); font-family: var(--display); font-size: 10px; touch-action: none; }
+#tbtns button.on { border-color: var(--amber); color: var(--amber); }
+#t-atk { background: rgba(110,30,26,.85) !important; }
+
+@media (max-width: 760px) {
+  body { font-size: 18px; }
+  .inv-cols { grid-template-columns: minmax(0, 1fr); }
+  #inv-preview { display: none; }
+  .title-row { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; }
+  #stats { width: 160px; padding: 10px; }
+  .bar { grid-template-columns: 46px 1fr; font-size: 15px; }
+  #mini { width: 110px; height: 55px; }
+  #v-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vrow { grid-template-columns: minmax(0, 1fr); }
+  #log { bottom: calc(250px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) { #banner.show { animation-duration: .01s; opacity: 1; } .bar.low i::after { animation: none; } }
+</style>
+
+<canvas id="game"></canvas>
+
+<div id="hud" hidden>
+  <div id="stats" class="panel">
+    <div class="bar" id="b-hp"><span>Vida</span><i></i></div>
+    <div class="bar" id="b-food"><span>Fome</span><i></i></div>
+    <div class="bar" id="b-water"><span>Sede</span><i></i></div>
+    <div class="bar" id="b-stam"><span>Fôlego</span><i></i></div>
+    <div id="status"></div>
+  </div>
+  <div id="topright" class="panel">
+    <div id="clock">Dia 1 · 08:00</div>
+    <canvas id="mini" width="160" height="80"></canvas>
+    <div id="kills">0 abatidos</div>
+    <div id="horde"></div>
+    <button id="menu-btn" class="btn small" type="button">Menu</button>
+  </div>
+  <div id="log"></div>
+  <div id="banner"></div>
+  <div id="bottom">
+    <div id="prompt" hidden></div>
+    <div id="hotbar" class="panel"></div>
+  </div>
+</div>
+
+<div id="touch" hidden>
+  <div id="stick"><div id="knob"></div></div>
+  <div id="tbtns">
+    <button id="t-light" type="button">Luz</button>
+    <button id="t-crouch" type="button">Agachar</button>
+    <button id="t-bag" type="button">Bolsa</button>
+    <button id="t-run" type="button">Correr</button>
+    <button id="t-use" type="button">Usar</button>
+    <button id="t-atk" type="button">Atacar</button>
+  </div>
+</div>
+
+<div id="inv" hidden>
+  <div class="panel">
+    <div class="inv-head">
+      <h2>Inventário</h2>
+      <span id="bag-weight">Peso 0 / 22</span>
+      <button id="inv-close" class="btn small" type="button">Fechar (Tab)</button>
+    </div>
+    <div class="inv-cols">
+      <div class="col">
+        <canvas id="inv-preview" width="168" height="204"></canvas>
+        <div class="equip">
+          <div>Cabeça<span id="eq-head"></span></div>
+          <div>Corpo<span id="eq-body"></span></div>
+          <div>Costas<span id="eq-back"></span></div>
+        </div>
+      </div>
+      <div class="col">
+        <h3>Bolsos · 1–6 = barra rápida</h3>
+        <div id="bag-grid" class="grid"></div>
+        <div id="details"></div>
+      </div>
+      <div class="col">
+        <div id="loot-panel" hidden>
+          <div class="inv-head"><h3 id="loot-title">Container</h3><button id="loot-all" class="btn small" type="button">Pegar tudo</button></div>
+          <div id="loot-grid" class="grid"></div>
+          <p id="loot-empty" class="hint">Nada aqui.</p>
+        </div>
+        <h3>Criar</h3>
+        <div id="craft-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="viewer" class="screen dim" hidden>
+  <div class="card panel">
+    <div class="inv-head">
+      <h2>Sprites · 8 direções</h2>
+      <div class="actions"><button id="v-download" class="btn small" type="button">Baixar folha PNG</button><button id="viewer-close" class="btn small" type="button">Fechar</button></div>
+    </div>
+    <div class="vrow"><span>Personagem</span><div id="v-spec" class="chips"></div></div>
+    <div class="vrow"><span>Movimento</span><div id="v-anim" class="chips"></div></div>
+    <div class="vrow" id="v-item-row"><span>Na mão</span><div id="v-item" class="chips"></div></div>
+    <div id="v-grid"></div>
+    <div id="v-info"></div>
+  </div>
+</div>
+
+<div id="pause" class="screen dim" hidden>
+  <div class="card panel">
+    <h2>Pausado</h2>
+    <div class="controls" id="pause-controls"></div>
+    <div class="actions"><button id="btn-resume" class="btn primary" type="button">Continuar</button><button id="btn-pause-sprites" class="btn" type="button">Ver sprites</button></div>
+  </div>
+</div>
+
+<div id="death" class="screen dim" hidden>
+  <div class="card panel">
+    <h1 class="logo">VOCÊ <span>MORREU</span></h1>
+    <p id="death-stats" class="tag"></p>
+    <div class="actions"><button id="btn-retry" class="btn primary" type="button">Tentar de novo</button></div>
+  </div>
+</div>
+
+<div id="title" class="screen" hidden>
+  <div class="card panel">
+    <div class="title-row">
+      <canvas id="title-preview" width="168" height="204"></canvas>
+      <div>
+        <h1 class="logo">ZONA <span>ZERO</span></h1>
+        <p class="tag">Sobrevivência isométrica. Vasculhe a cidade, junte suprimentos, erga barricadas e aguente as hordas.</p>
+      </div>
+    </div>
+    <div class="actions"><button id="btn-start" class="btn primary" type="button">Começar</button><button id="btn-sprites" class="btn" type="button">Ver sprites</button></div>
+    <div class="controls" id="title-controls"></div>
+  </div>
+</div>
+
+<div id="loading" class="screen">
+  <div style="display:grid;gap:10px;justify-items:center">
+    <p>Montando sprites voxel…</p>
+    <div id="load-bar"><i></i></div>
+  </div>
+</div>
+
+<script src="js/voxel.js"></script>
+<script src="js/items.js"></script>
+<script src="js/characters.js"></script>
+<script src="js/world.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(() => {
+  const ctl = GAME.isTouch
+    ? [['Analógico', 'mover'], ['Atacar', 'golpe / tiro / construir'], ['Usar', 'portas e containers'], ['Correr', 'liga e desliga'], ['Agachar', 'furtivo'], ['Bolsa', 'inventário']]
+    : [['WASD', 'mover'], ['Shift', 'correr'], ['C', 'agachar'], ['Clique / Espaço', 'atacar na direção do mouse'], ['Botão direito / R', 'construir barricada'], ['E', 'portas, containers, itens'], ['Tab / I', 'inventário'], ['1–6', 'barra rápida'], ['F', 'lanterna'], ['V', 'ver sprites'], ['Roda', 'zoom'], ['Esc', 'pausa']];
+  const html = ctl.map(([k, v]) => `<div><kbd>${k}</kbd><span>${v}</span></div>`).join('');
+  document.getElementById('title-controls').innerHTML = html;
+  document.getElementById('pause-controls').innerHTML = html;
+  UI.init();
+  GAME.init();
+  GAME.preload((v) => { document.querySelector('#load-bar i').style.width = Math.round(v * 100) + '%'; }).then(() => {
+    document.getElementById('loading').hidden = true;
+    document.getElementById('title').hidden = false;
+  });
+})();
+</script>
